@@ -38,7 +38,8 @@ loop.
 - Data documentation: `Docs/data_documentation.md`
 - Business value diagram: `Docs/readme_business_value.svg`
 - Workflow diagram: `Docs/readme_workflow.svg`
-- Architecture diagram: `Docs/readme_architecture.svg`
+- Architecture diagram: Mermaid source embedded in the [Architecture](#architecture)
+  section below
 - Clinician review diagram: `Docs/readme_clinician_review.svg`
 - Source reference flowchart: `Docs/stakeholder_flowchart.png`
 
@@ -57,7 +58,76 @@ loop.
 
 ## Architecture
 
-![Care Transition Copilot architecture overview](Docs/readme_architecture.svg)
+```mermaid
+flowchart TB
+    subgraph Pipeline["Care transition workflow"]
+        direction LR
+
+        subgraph Intake["Data intake"]
+            direction TB
+            ehr["Hospital EHR<br/>Discharge event"]
+            adapter["FHIR / HL7v2 adapter<br/>Normalize records"]
+            kafka["Kafka event bus<br/>Episode stream"]
+            ehr --> adapter --> kafka
+        end
+
+        subgraph Data["Clinical data plane"]
+            direction TB
+            postgres["Postgres<br/>Episodes, features, audit IDs"]
+            chroma["ChromaDB<br/>Notes and discharge text"]
+            features["Feature store<br/>Readmission predictors"]
+            postgres --- chroma
+            postgres --- features
+        end
+
+        subgraph Decision["Decision services"]
+            direction TB
+            model["Risk model API<br/>Cox / hazard model"]
+            explain["Explanation service<br/>SHAP + subgroup checks"]
+            agents["Agent orchestrator<br/>Retrieve, draft, critique"]
+            model --> explain --> agents
+        end
+
+        subgraph Delivery["Care delivery"]
+            direction TB
+            clinician["Clinician UI<br/>Review and sign off"]
+            fhir["FHIR write-back<br/>Approved plan only"]
+            notify["Notifications<br/>Portal / reminder"]
+            clinician -->|Approved| fhir --> notify
+        end
+    end
+
+    kafka --> postgres
+    kafka --> chroma
+    kafka --> features
+    features --> model
+    chroma --> agents
+    postgres --> agents
+    agents --> clinician
+    notify -. Outcomes and completion status .-> postgres
+    clinician -. Edit or reject .-> agents
+
+    subgraph Controls["Production controls"]
+        direction LR
+        security["Access and audit<br/>OAuth2 / RBAC | Audit logging"]
+        operations["Reliability and delivery<br/>Retries | Circuit breakers | CI/CD"]
+        quality["Observability and quality<br/>Prometheus / Grafana | Drift monitoring"]
+    end
+
+    Controls -. Applies across every layer .-> Pipeline
+
+    classDef intake fill:#e8f5f3,stroke:#147c78,color:#10213f,stroke-width:2px;
+    classDef data fill:#eef4ff,stroke:#466eb6,color:#10213f,stroke-width:2px;
+    classDef decision fill:#e8f5f3,stroke:#147c78,color:#10213f,stroke-width:2px;
+    classDef delivery fill:#fff5df,stroke:#a66a16,color:#10213f,stroke-width:2px;
+    classDef control fill:#f3f6fb,stroke:#526174,color:#10213f,stroke-width:1px;
+
+    class ehr,adapter,kafka intake;
+    class postgres,chroma,features data;
+    class model,explain,agents decision;
+    class clinician,fhir,notify delivery;
+    class security,operations,quality control;
+```
 
 - **Data** - FHIR/HL7v2 discharge events flow through Kafka into Postgres for
   structured data and ChromaDB for clinical text retrieval.
