@@ -71,6 +71,7 @@ pytest tests/
 
 ## Project structure
 
+```
 src/
 ├── ingestion/ # HL7v2 / FHIR parsing → canonical DischargeRecord
 ├── features/ # Feature engineering (comorbidity grouping, med flags, etc.)
@@ -78,6 +79,7 @@ src/
 ├── agents/ # LangGraph orchestrator + retrieval/reasoning/critique agents
 ├── api/ # FastAPI service (Model Serving API)
 └── frontend/ # Clinician-facing web app
+```
 
 
 ## Data
@@ -88,10 +90,10 @@ See `docs/data_documentation.md` for the full HL7v2/FHIR schema reference.
 
 ## Tech stack
 
-| Layer | Tools |
-|-------|-------|
+| Layer      | Tools |
+|------------|----------------------------------|
 | Risk model | scikit-survival, SHAP, Fairlearn |
-| API        | FastAPI |
-| Agents     | LangGraph, LlamaIndex, Groq API |
-| Data       | Postgres, ChromaDB, Redis |
-| Frontend   | React (or Streamlit for MVP) |
+| API        | FastAPI                          |
+| Agents     | LangGraph, LlamaIndex, Groq API  |
+| Data       | Postgres, ChromaDB, Redis        |
+| Frontend   | React (or Streamlit for MVP)     |
