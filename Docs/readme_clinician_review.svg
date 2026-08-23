@@ -37,8 +37,8 @@
 
   <rect class="page" width="1440" height="860"/>
   <text class="eyebrow" x="84" y="78">CLINICIAN EXPERIENCE</text>
-  <text class="ink" x="84" y="126" font-size="44" font-weight="800">Review, verify, then act</text>
-  <text class="muted" x="84" y="164" font-size="19">A production interface should make draft status, citations, and approval controls impossible to miss.</text>
+  <text class="ink" x="84" y="138" font-size="44" font-weight="800">Review, verify, then act</text>
+  <text class="muted" x="84" y="178" font-size="19">A production interface should make draft status, citations, and approval controls impossible to miss.</text>
 
   <rect class="shell" x="72" y="220" width="1296" height="560"/>
   <rect class="topbar" x="72" y="220" width="1296" height="64" rx="28"/>

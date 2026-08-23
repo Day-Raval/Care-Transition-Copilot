@@ -39,8 +39,8 @@
 
   <rect class="bg" width="1440" height="820"/>
   <text class="eyebrow" x="84" y="78">OPERATING VALUE MAP</text>
-  <text class="ink" x="84" y="126" font-size="44" font-weight="800">Turn discharge risk into completed follow-up</text>
-  <text class="muted" x="84" y="164" font-size="19">A governed workflow connects prediction, evidence retrieval, drafted plans, and clinician approval.</text>
+  <text class="ink" x="84" y="138" font-size="44" font-weight="800">Turn discharge risk into completed follow-up</text>
+  <text class="muted" x="84" y="178" font-size="19">A governed workflow connects prediction, evidence retrieval, drafted plans, and clinician approval.</text>
 
   <rect class="panel" x="72" y="210" width="1296" height="496"/>
 

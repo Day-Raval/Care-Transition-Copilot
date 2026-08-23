@@ -36,8 +36,8 @@
 
   <rect class="page" width="1440" height="900"/>
   <text class="eyebrow" x="84" y="78">REFERENCE ARCHITECTURE</text>
-  <text class="ink" x="84" y="126" font-size="44" font-weight="800">Layered ML + agentic care coordination</text>
-  <text class="muted" x="84" y="164" font-size="19">A production-oriented shape for ingestion, prediction, retrieval, review, and feedback.</text>
+  <text class="ink" x="84" y="138" font-size="44" font-weight="800">Layered ML + agentic care coordination</text>
+  <text class="muted" x="84" y="178" font-size="19">A production-oriented shape for ingestion, prediction, retrieval, review, and feedback.</text>
 
   <rect class="group" x="70" y="220" width="300" height="450"/>
   <text class="groupTitle" x="104" y="262">Data intake</text>

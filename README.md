@@ -30,7 +30,21 @@ completed follow-ups. The value comes from connecting risk stratification,
 context retrieval, plan drafting, and clinician approval into one operational
 loop.
 
+![Care Transition Copilot business value diagram](Docs/readme_business_value.svg)
+
+## Documentation and diagrams
+
+- Proposal: `Docs/Care_Transition_Copilot_Proposal.docx`
+- Data documentation: `Docs/data_documentation.md`
+- Business value diagram: `Docs/readme_business_value.svg`
+- Workflow diagram: `Docs/readme_workflow.svg`
+- Architecture diagram: `Docs/readme_architecture.svg`
+- Clinician review diagram: `Docs/readme_clinician_review.svg`
+- Source reference flowchart: `Docs/stakeholder_flowchart.png`
+
 ## How it works
+
+![High-risk discharge workflow](Docs/readme_workflow.svg)
 
 1. A discharge event enters the system.
 2. The risk model scores the patient's chance of readmission within 30 days.
@@ -43,7 +57,7 @@ loop.
 
 ## Architecture
 
-![System architecture](Docs/system_architecture.png)
+![Care Transition Copilot architecture overview](Docs/readme_architecture.svg)
 
 - **Data** - FHIR/HL7v2 discharge events flow through Kafka into Postgres for
   structured data and ChromaDB for clinical text retrieval.
@@ -59,8 +73,6 @@ loop.
 
 ## Application scope
 
-![Application functionality map](Docs/application_functionality_map.png)
-
 The MVP focuses on four user-facing capabilities:
 
 - Risk scoring for recently discharged patients.
@@ -70,11 +82,7 @@ The MVP focuses on four user-facing capabilities:
 
 ## Clinician UI
 
-![User flow](Docs/user_flow.png)
-
-![Risk queue dashboard](Docs/risk_queue_dashboard.png)
-
-![Patient detail and care plan review](Docs/patient_detail_review.png)
+![Clinician review concept](Docs/readme_clinician_review.svg)
 
 Design principles from the proposal:
 
