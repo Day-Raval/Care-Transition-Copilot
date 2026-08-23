@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">Care Transition Copilot production architecture</title>
+  <desc id="desc">Production-style system architecture showing ingestion, storage, model serving, agent orchestration, clinician review, patient follow-up, and cross-cutting platform services.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f9fbff"/>
+      <stop offset="1" stop-color="#edf7f5"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" x2="1">
+      <stop offset="0" stop-color="#10213f"/>
+      <stop offset="1" stop-color="#21446f"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2 2 L10 6 L2 10 Z" fill="#526174"/>
+    </marker>
+    <style>
+      .page { fill: url(#bg); }
+      .ink { fill: #10213f; font-family: Inter, Segoe UI, Arial, sans-serif; }
+      .muted { fill: #667085; font-family: Inter, Segoe UI, Arial, sans-serif; }
+      .eyebrow { fill: #147c78; font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 14px; font-weight: 800; letter-spacing: .08em; }
+      .group { fill: #ffffff; stroke: #d7e1e7; stroke-width: 1.5; rx: 28; filter: url(#shadow); }
+      .groupTitle { fill: #10213f; font-family: Inter, Segoe UI, Arial, sans-serif; font-size: 18px; font-weight: 800; }
+      .box { fill: #ffffff; stroke: #cfd9e3; stroke-width: 1.5; rx: 14; }
+      .teal { fill: #e8f5f3; stroke: #147c78; stroke-width: 2; rx: 14; }
+      .gold { fill: #fff5df; stroke: #a66a16; stroke-width: 2; rx: 14; }
+      .blue { fill: #eef4ff; stroke: #466eb6; stroke-width: 2; rx: 14; }
+      .rail { fill: #10213f; rx: 22; }
+      .line { stroke: #526174; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #8a98aa; stroke-width: 2; stroke-dasharray: 7 7; fill: none; marker-end: url(#arrow); }
+      .chip { fill: #f3f6fb; stroke: #d0d9e2; stroke-width: 1; rx: 12; }
+    </style>
+  </defs>
+
+  <rect class="page" width="1440" height="900"/>
+  <text class="eyebrow" x="84" y="78">REFERENCE ARCHITECTURE</text>
+  <text class="ink" x="84" y="126" font-size="44" font-weight="800">Layered ML + agentic care coordination</text>
+  <text class="muted" x="84" y="164" font-size="19">A production-oriented shape for ingestion, prediction, retrieval, review, and feedback.</text>
+
+  <rect class="group" x="70" y="220" width="300" height="450"/>
+  <text class="groupTitle" x="104" y="262">Data intake</text>
+  <rect class="teal" x="104" y="292" width="232" height="64"/>
+  <text class="ink" x="132" y="322" font-size="16" font-weight="800">Hospital EHR</text>
+  <text class="muted" x="132" y="344" font-size="13">Discharge event</text>
+  <rect class="box" x="104" y="386" width="232" height="64"/>
+  <text class="ink" x="132" y="416" font-size="16" font-weight="800">FHIR / HL7v2 adapter</text>
+  <text class="muted" x="132" y="438" font-size="13">Normalize records</text>
+  <rect class="box" x="104" y="480" width="232" height="64"/>
+  <text class="ink" x="132" y="510" font-size="16" font-weight="800">Kafka event bus</text>
+  <text class="muted" x="132" y="532" font-size="13">Episode stream</text>
+  <path class="line" d="M220 356 V380"/>
+  <path class="line" d="M220 450 V474"/>
+
+  <rect class="group" x="420" y="220" width="300" height="450"/>
+  <text class="groupTitle" x="454" y="262">Clinical data plane</text>
+  <rect class="blue" x="454" y="292" width="232" height="64"/>
+  <text class="ink" x="482" y="322" font-size="16" font-weight="800">Postgres</text>
+  <text class="muted" x="482" y="344" font-size="13">Episodes, features, audit IDs</text>
+  <rect class="blue" x="454" y="386" width="232" height="64"/>
+  <text class="ink" x="482" y="416" font-size="16" font-weight="800">ChromaDB</text>
+  <text class="muted" x="482" y="438" font-size="13">Notes and discharge text</text>
+  <rect class="blue" x="454" y="480" width="232" height="64"/>
+  <text class="ink" x="482" y="510" font-size="16" font-weight="800">Feature store</text>
+  <text class="muted" x="482" y="532" font-size="13">Readmission predictors</text>
+  <path class="line" d="M336 512 H448"/>
+
+  <rect class="group" x="770" y="220" width="300" height="450"/>
+  <text class="groupTitle" x="804" y="262">Decision services</text>
+  <rect class="teal" x="804" y="292" width="232" height="64"/>
+  <text class="ink" x="832" y="322" font-size="16" font-weight="800">Risk model API</text>
+  <text class="muted" x="832" y="344" font-size="13">Cox / hazard model</text>
+  <rect class="teal" x="804" y="386" width="232" height="64"/>
+  <text class="ink" x="832" y="416" font-size="16" font-weight="800">Explanation service</text>
+  <text class="muted" x="832" y="438" font-size="13">SHAP + subgroup checks</text>
+  <rect class="teal" x="804" y="480" width="232" height="64"/>
+  <text class="ink" x="832" y="510" font-size="16" font-weight="800">Agent orchestrator</text>
+  <text class="muted" x="832" y="532" font-size="13">Retrieve, draft, critique</text>
+  <path class="line" d="M686 512 H798"/>
+  <path class="dash" d="M686 418 C732 418 754 418 798 418"/>
+
+  <rect class="group" x="1120" y="220" width="250" height="450"/>
+  <text class="groupTitle" x="1154" y="262">Care delivery</text>
+  <rect class="gold" x="1154" y="292" width="182" height="64"/>
+  <text class="ink" x="1182" y="322" font-size="16" font-weight="800">Clinician UI</text>
+  <text class="muted" x="1182" y="344" font-size="13">Review and sign off</text>
+  <rect class="gold" x="1154" y="386" width="182" height="64"/>
+  <text class="ink" x="1182" y="416" font-size="16" font-weight="800">FHIR write-back</text>
+  <text class="muted" x="1182" y="438" font-size="13">Approved plan only</text>
+  <rect class="gold" x="1154" y="480" width="182" height="64"/>
+  <text class="ink" x="1182" y="510" font-size="16" font-weight="800">Notifications</text>
+  <text class="muted" x="1182" y="532" font-size="13">Portal / reminder stub</text>
+  <path class="line" d="M1036 512 H1148"/>
+  <path class="line" d="M1245 356 V380"/>
+  <path class="line" d="M1245 450 V474"/>
+
+  <path class="dash" d="M1245 544 C1245 740 570 740 570 550"/>
+  <text class="muted" x="785" y="736" font-size="14">outcomes return to storage for monitoring and future retraining</text>
+
+  <rect class="rail" x="72" y="718" width="1296" height="108"/>
+  <text x="110" y="758" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="800">Production controls</text>
+  <g>
+    <rect class="chip" x="110" y="780" width="178" height="30"/>
+    <text class="muted" x="199" y="800" font-size="13" font-weight="700" text-anchor="middle">OAuth2 / RBAC</text>
+    <rect class="chip" x="310" y="780" width="178" height="30"/>
+    <text class="muted" x="399" y="800" font-size="13" font-weight="700" text-anchor="middle">Audit logging</text>
+    <rect class="chip" x="510" y="780" width="178" height="30"/>
+    <text class="muted" x="599" y="800" font-size="13" font-weight="700" text-anchor="middle">Prometheus / Grafana</text>
+    <rect class="chip" x="710" y="780" width="178" height="30"/>
+    <text class="muted" x="799" y="800" font-size="13" font-weight="700" text-anchor="middle">Drift monitoring</text>
+    <rect class="chip" x="910" y="780" width="178" height="30"/>
+    <text class="muted" x="999" y="800" font-size="13" font-weight="700" text-anchor="middle">Retries / circuit breakers</text>
+    <rect class="chip" x="1110" y="780" width="178" height="30"/>
+    <text class="muted" x="1199" y="800" font-size="13" font-weight="700" text-anchor="middle">CI/CD packaging</text>
+  </g>
+</svg>

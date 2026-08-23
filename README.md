@@ -1,29 +1,91 @@
 # Care Transition Copilot
 
 An AI system that predicts 30-day hospital readmission risk, retrieves the
-relevant patient context, and drafts a personalized follow-up plan — with a
+relevant patient context, and drafts a personalized follow-up plan, with a
 clinician reviewing and approving every plan before it reaches a patient
 record.
 
+## Problem
+
+Hospitals often know which discharged patients are at elevated readmission risk,
+but the risk score, patient context, and follow-up plan usually live in separate
+systems. This project connects those pieces into one workflow: predict who is at
+risk, retrieve the clinical context, draft a follow-up plan, and route it through
+clinician review before action.
+
 ## What this is
 
-Three layers, each doing the job it's suited for:
+Three layers, each doing the job it is suited for:
 
-- **ML** — a survival/hazard model scores readmission risk and is audited
-  for fairness across patient subgroups.
-- **Agents** — a single retrieval agent pulls chart context; a coordinated
-  team of agents drafts a follow-up plan and runs it past a second model
-  as a checklist-based critique.
-- **Human review** — nothing reaches the patient or their record without
+- **ML** - a survival/hazard model scores readmission risk and is audited for
+  fairness across patient subgroups.
+- **Agents** - a retrieval agent pulls chart context; a coordinated agent
+  workflow drafts a follow-up plan and runs it through checklist-based critique.
+- **Human review** - nothing reaches the patient or their record without
   explicit clinician sign-off in the web app.
 
-See `docs/proposal.docx` for the full write-up, `docs/architecture_v3.png`
-for the system architecture, and `docs/data_documentation.md` for the data
-schemas this project runs on.
+The system is designed to move four outcomes together: fewer avoidable
+readmissions, lower readmission costs, faster care coordination, and more
+completed follow-ups. The value comes from connecting risk stratification,
+context retrieval, plan drafting, and clinician approval into one operational
+loop.
+
+## How it works
+
+1. A discharge event enters the system.
+2. The risk model scores the patient's chance of readmission within 30 days.
+3. High-risk patients trigger chart retrieval and follow-up plan drafting.
+4. A second model critiques the draft against fixed safety and completeness
+   checks.
+5. A clinician approves, edits, or rejects the plan.
+6. Approved plans are written back to the record and used for patient follow-up.
+7. Outcomes feed back into the data layer for monitoring and improvement.
+
+## Architecture
+
+![System architecture](Docs/system_architecture.png)
+
+- **Data** - FHIR/HL7v2 discharge events flow through Kafka into Postgres for
+  structured data and ChromaDB for clinical text retrieval.
+- **Prediction** - a scikit-survival or lifelines model scores readmission risk,
+  with SHAP explanations and Fairlearn/Aequitas subgroup audits.
+- **Agents** - LangGraph coordinates retrieval, care-plan drafting, critique,
+  explanation, and clinician handoff.
+- **Review and action** - a clinician-facing app keeps AI output in draft state
+  until approval, then writes the plan back through FHIR and sends follow-up
+  notifications.
+- **Platform services** - OAuth2/RBAC, audit logging, monitoring, CI/CD, drift
+  checks, retries, and circuit breakers support the workflow.
+
+## Application scope
+
+![Application functionality map](Docs/application_functionality_map.png)
+
+The MVP focuses on four user-facing capabilities:
+
+- Risk scoring for recently discharged patients.
+- Clinical context retrieval with source citations.
+- Care-plan orchestration with draft, critique, and explanation steps.
+- Clinician actions to approve, edit, reject, notify, or open the patient portal.
+
+## Clinician UI
+
+![User flow](Docs/user_flow.png)
+
+![Risk queue dashboard](Docs/risk_queue_dashboard.png)
+
+![Patient detail and care plan review](Docs/patient_detail_review.png)
+
+Design principles from the proposal:
+
+- AI-generated care plans are always visibly drafts until a clinician acts.
+- Every risk score and retrieved chart fact should be traceable to its source.
+- Fairness alerts belong on the main dashboard, not buried in settings.
 
 ## Status
-
-🚧 MVP in progress — see the 4-week build plan in the proposal doc.
+MVP in progress. The proposal scopes a four-week build: synthetic data and
+baseline modeling, fairness audit and RAG retrieval, agent orchestration with
+failure recovery, then a clinician-facing demo with end-to-end test episodes.
 
 ## Getting started
 
@@ -71,29 +133,39 @@ pytest tests/
 
 ## Project structure
 
-```
+```text
 src/
-├── ingestion/    # HL7v2 / FHIR parsing → canonical DischargeRecord
+├── ingestion/    # HL7v2 / FHIR parsing -> canonical DischargeRecord
 ├── features/     # Feature engineering (comorbidity grouping, med flags, etc.)
 ├── model/        # Risk model training + SHAP + Fairlearn audit
 ├── agents/       # LangGraph orchestrator + retrieval/reasoning/critique agents
 ├── api/          # FastAPI service (Model Serving API)
 └── frontend/     # Clinician-facing web app
-```  
-
+```
 
 ## Data
 
-This project uses **synthetic data only** ([Synthea](https://synthetichealth.github.io/synthea/)) —
-no real patient data or data use agreement is required to run or demo it.
-See `docs/data_documentation.md` for the full HL7v2/FHIR schema reference.
+This project uses **synthetic data only**
+([Synthea](https://synthetichealth.github.io/synthea/)) - no real patient data
+or data use agreement is required to run or demo it. See
+`Docs/data_documentation.md` for the full HL7v2/FHIR schema reference.
 
 ## Tech stack
 
-| Layer      | Tools |
-|------------|----------------------------------|
-| Risk model | scikit-survival, SHAP, Fairlearn |
-| API        | FastAPI                          |
-| Agents     | LangGraph, LlamaIndex, Groq API  |
-| Data       | Postgres, ChromaDB, Redis        |
-| Frontend   | React (or Streamlit for MVP)     |
+| Layer | Tools |
+| --- | --- |
+| Risk model | scikit-survival or lifelines, SHAP, Fairlearn or Aequitas |
+| API | FastAPI |
+| Agents | LangGraph, LlamaIndex or LangChain, Groq/OpenAI-compatible LLMs |
+| Data | Postgres, ChromaDB, Redis, Kafka |
+| Frontend | React or Streamlit for MVP |
+| Notifications | Twilio or patient portal stub |
+
+## Success criteria
+
+- Risk model performance is comparable to published readmission modeling
+  baselines.
+- Fairness metrics are tracked across patient subgroups.
+- Retrieved chart context cites the correct source records in manual test cases.
+- The full workflow can flag a patient, retrieve context, draft a plan, explain
+  the reasoning, and recover from at least one intentionally failed step.
