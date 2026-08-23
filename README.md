@@ -73,13 +73,13 @@ pytest tests/
 
 ```
 src/
-├── ingestion/ # HL7v2 / FHIR parsing → canonical DischargeRecord
-├── features/ # Feature engineering (comorbidity grouping, med flags, etc.)
-├── model/ # Risk model training + SHAP + Fairlearn audit
-├── agents/ # LangGraph orchestrator + retrieval/reasoning/critique agents
-├── api/ # FastAPI service (Model Serving API)
-└── frontend/ # Clinician-facing web app
-```
+├── ingestion/    # HL7v2 / FHIR parsing → canonical DischargeRecord
+├── features/     # Feature engineering (comorbidity grouping, med flags, etc.)
+├── model/        # Risk model training + SHAP + Fairlearn audit
+├── agents/       # LangGraph orchestrator + retrieval/reasoning/critique agents
+├── api/          # FastAPI service (Model Serving API)
+└── frontend/     # Clinician-facing web app
+```  
 
 
 ## Data
