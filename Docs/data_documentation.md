@@ -13,7 +13,7 @@ Discharge data arrives from the hospital system in two different forms, each ser
 different purpose:
 
 | Source | Format | Role | Delivery |
-|--------|--------|------|----------|
+|---|---|---|---|
 | ADT feed | HL7v2 | Event trigger — signals *that* a discharge happened | Pushed in real time |
 | Clinical data | FHIR R4 | Clinical content — *what* happened | Pulled via REST after the trigger |
 
@@ -108,21 +108,39 @@ Provides admit/discharge timestamps and disposition.
 
 ### 3.2 Condition (one resource per diagnosis)
 
+> **Correction (confirmed against generated data, 2026-08-25):** Synthea emits
+> Condition codes as **SNOMED CT**, not ICD-10, in 100% of sampled records —
+> the `http://hl7.org/fhir/sid/icd-10` example below was a planning
+> assumption and does not match real output. A real hospital feed may still
+> use ICD-10, so the parser should read `coding[].system` and branch rather
+> than assuming one system.
+
 ```json
 {
   "resourceType": "Condition",
   "subject": { "reference": "Patient/88213" },
   "code": {
-    "coding": [{ "system": "http://hl7.org/fhir/sid/icd-10", "code": "I50.9", "display": "Congestive heart failure" }]
+    "coding": [{ "system": "http://snomed.info/sct", "code": "84114007", "display": "Heart failure" }]
   },
   "recordedDate": "2026-08-15"
 }
 ```
 
-Raw ICD-10 codes are **not** used directly as model features (too sparse,
-high-cardinality). They're grouped first — see Section 5.
+Raw codes are **not** used directly as model features (too sparse,
+high-cardinality) regardless of system. They're grouped first — see Section 5.
+SNOMED CT requires a different comorbidity-grouping path than ICD-10
+(Elixhauser/Charlson mappings are ICD-based) — either map SNOMED → ICD-10-CM
+first, or use a SNOMED-native comorbidity grouper.
 
 ### 3.3 MedicationRequest (one resource per discharge medication)
+
+> **Correction (confirmed against generated data):** medication coding is
+> **mixed**, not uniformly inline — about 85% of MedicationRequest resources
+> carry an inline `medicationCodeableConcept`, but the remaining ~15% only
+> carry a `medicationReference` pointing to a separate `Medication` resource
+> elsewhere in the same bundle. The parser must check for
+> `medicationCodeableConcept` first and fall back to resolving
+> `medicationReference` against the bundle's `Medication` entries.
 
 ```json
 {
@@ -131,6 +149,17 @@ high-cardinality). They're grouped first — see Section 5.
   "medicationCodeableConcept": { "text": "Furosemide 40mg" },
   "authoredOn": "2026-08-21",
   "dosageInstruction": [{ "text": "Once daily" }]
+}
+```
+
+```json
+// The ~15% case — requires a join against the bundle's Medication resources
+{
+  "resourceType": "MedicationRequest",
+  "subject": { "reference": "Patient/88213" },
+  "medicationReference": { "reference": "urn:uuid:39c659fd-..." },
+  "status": "completed",
+  "intent": "order"
 }
 ```
 

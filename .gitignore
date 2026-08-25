@@ -5,3 +5,8 @@ __pycache__/
 *.pyo  
 .python-version
 /planner/
+
+# Synthetic data (regenerable — see scripts/generate_synthetic_data.sh)
+data/raw/
+scripts/*.jar
+!data/samples/
