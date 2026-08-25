@@ -148,6 +148,7 @@ Design principles from the proposal:
 - Fairness alerts belong on the main dashboard, not buried in settings.
 
 ## Status
+
 MVP in progress. The proposal scopes a four-week build: synthetic data and
 baseline modeling, fairness audit and RAG retrieval, agent orchestration with
 failure recovery, then a clinician-facing demo with end-to-end test episodes.
