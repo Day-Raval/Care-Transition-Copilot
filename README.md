@@ -30,19 +30,6 @@ completed follow-ups. The value comes from connecting risk stratification,
 context retrieval, plan drafting, and clinician approval into one operational
 loop.
 
-![Care Transition Copilot business value diagram](Docs/readme_business_value.svg)
-
-## Documentation and diagrams
-
-- Proposal: `Docs/Care_Transition_Copilot_Proposal.docx`
-- Data documentation: `Docs/data_documentation.md`
-- Business value diagram: `Docs/readme_business_value.svg`
-- Workflow diagram: `Docs/readme_workflow.svg`
-- Architecture diagram: Mermaid source embedded in the [Architecture](#architecture)
-  section below
-- Clinician review diagram: `Docs/readme_clinician_review.svg`
-- Source reference flowchart: `Docs/stakeholder_flowchart.png`
-
 ## How it works
 
 ![High-risk discharge workflow](Docs/readme_workflow.svg)
