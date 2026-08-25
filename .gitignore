@@ -4,4 +4,4 @@ __pycache__/
 *.pyc
 *.pyo  
 .python-version
-planner/ # project status planner
+planner/
