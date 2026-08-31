@@ -10,3 +10,6 @@ __pycache__/
 data/raw/
 scripts/*.jar
 !data/samples/
+
+#logging
+logs/
