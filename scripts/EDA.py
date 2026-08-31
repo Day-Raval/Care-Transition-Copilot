@@ -121,7 +121,7 @@ def main():
     leakage_spot_check(df)
 
     print("=" * 60)
-    print("Done. Review the leakage spot-check by hand before moving to Day 5.")
+    print("Done. Review the leakage spot-check by hand before moving ahead.")
     print("=" * 60)
 
 
