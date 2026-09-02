@@ -85,8 +85,8 @@ def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[
     discharge_ts = encounter["period"]["end"]
     admit_ts = encounter["period"]["start"]
     los_days = (
-        datetime.fromisoformat(discharge_ts) - datetime.fromisoformat(admit_ts)
-    ).total_seconds() / 86400
+        datetime.fromisoformat(discharge_ts).date() - datetime.fromisoformat(admit_ts).date()
+    ).days
 
     all_conditions = [r for r in entries if r["resourceType"] == "Condition"]
     all_medreqs = [r for r in entries if r["resourceType"] == "MedicationRequest"]
@@ -119,7 +119,7 @@ def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[
         encounter_id=encounter["id"],
         admit_ts=admit_ts,
         discharge_ts=discharge_ts,
-        length_of_stay_days=round(los_days, 2),
+        length_of_stay_days=los_days,
         age_at_discharge=calculate_age_years(patient["birthDate"], discharge_ts),
         admission_reason=(
             encounter.get("reasonCode", [{}])[0].get("coding", [{}])[0].get("display", "unknown")
@@ -135,7 +135,7 @@ def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[
     )
 
     logger.debug(
-        "Built record: patient=%s encounter=%s age=%d LOS=%.1fd meds=%d comorbidities=%s",
+        "Built record: patient=%s encounter=%s age=%d LOS=%dd meds=%d comorbidities=%s",
         patient_id, encounter["id"], record.age_at_discharge, record.length_of_stay_days,
         record.medication_count, record.comorbidity_categories,
     )

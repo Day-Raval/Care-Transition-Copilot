@@ -13,7 +13,7 @@ class DischargeRecord:
     encounter_id: str
     admit_ts: str
     discharge_ts: str
-    length_of_stay_days: float
+    length_of_stay_days: int
     age_at_discharge: int
 
     admission_reason: str                     # Encounter.reasonCode — 100% populated, confirmed
