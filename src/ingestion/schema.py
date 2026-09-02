@@ -15,6 +15,7 @@ class DischargeRecord:
     discharge_ts: str
     length_of_stay_days: int
     age_at_discharge: int
+    encounter_count: int  # how many raw IMP encounters were merged into this episode
 
     admission_reason: str                     # Encounter.reasonCode — 100% populated, confirmed
     discharge_disposition: str | None          # only ~10% populated — must allow None

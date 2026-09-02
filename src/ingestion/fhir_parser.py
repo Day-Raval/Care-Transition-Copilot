@@ -15,6 +15,8 @@ from datetime import datetime
 from src.ingestion.schema import DischargeRecord
 from src.ingestion.temporal_filters import active_conditions_at_discharge, active_medications_at_discharge
 from src.ingestion.comorbidity import categorize_conditions, flag_high_risk_meds
+from src.ingestion.episodes import cluster_encounters_into_episodes, count_prior_episodes_90d
+from src.utils.config import Config, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +52,6 @@ def decode_note(doc_ref: dict) -> str | None:
         return None
 
 
-def count_prior_admissions_90d(all_imp_encounters: list[dict], current_encounter: dict) -> int:
-    current_start = datetime.fromisoformat(current_encounter["period"]["start"])
-    count = 0
-    for enc in all_imp_encounters:
-        if enc["id"] == current_encounter["id"]:
-            continue
-        other_start = datetime.fromisoformat(enc["period"]["start"])
-        days_before = (current_start - other_start).total_seconds() / 86400
-        if 0 < days_before <= 90:
-            count += 1
-    return count
-
-
 def calculate_age_years(birth_date: str, as_of: str) -> int:
     """
     Completed years as of `as_of`, the clinical convention — not a fractional
@@ -78,12 +67,17 @@ def calculate_age_years(birth_date: str, as_of: str) -> int:
     return years
 
 
-def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[dict]) -> DischargeRecord:
+def build_record(entries: list[dict], episode: dict, all_patient_episodes: list[dict], cfg: Config) -> DischargeRecord:
     patient = next(r for r in entries if r["resourceType"] == "Patient")
     patient_id = patient["id"]
 
-    discharge_ts = encounter["period"]["end"]
-    admit_ts = encounter["period"]["start"]
+    admit_ts = episode["start"]
+    discharge_ts = episode["end"]
+    episode_encounters = episode["encounters"]
+    first_encounter = episode_encounters[0]   # admission — for admission_reason
+    last_encounter = episode_encounters[-1]   # actual discharge — for disposition
+    encounter_ids = {e["id"] for e in episode_encounters}
+
     los_days = (
         datetime.fromisoformat(discharge_ts).date() - datetime.fromisoformat(admit_ts).date()
     ).days
@@ -92,18 +86,22 @@ def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[
     all_medreqs = [r for r in entries if r["resourceType"] == "MedicationRequest"]
 
     active_conditions = active_conditions_at_discharge(all_conditions, discharge_ts)
-    active_meds = active_medications_at_discharge(all_medreqs, discharge_ts)
+    active_meds = active_medications_at_discharge(all_medreqs, discharge_ts, lookback_days=cfg.medication_lookback_days)
     med_names = [resolve_medication_name(m, entries) for m in active_meds]
     distinct_med_names = sorted(set(med_names))
 
     doc_refs = [
         r for r in entries
         if r["resourceType"] == "DocumentReference"
-        and any(e.get("reference") == f"urn:uuid:{encounter['id']}" for e in r.get("context", {}).get("encounter", []))
+        and any(
+            e.get("reference", "").replace("urn:uuid:", "") in encounter_ids
+            for e in r.get("context", {}).get("encounter", [])
+        )
     ]
+    doc_refs.sort(key=lambda r: r.get("date", ""), reverse=True)
     if not doc_refs:
-        logger.warning("Encounter %s (patient %s) has no linked DocumentReference — note text will be null",
-                        encounter["id"], patient_id)
+        logger.warning("Episode ending %s (patient %s) has no linked DocumentReference — note text will be null",
+                        discharge_ts, patient_id)
     note_text = decode_note(doc_refs[0]) if doc_refs else None
 
     race_ext = next(
@@ -116,52 +114,58 @@ def build_record(entries: list[dict], encounter: dict, all_imp_encounters: list[
 
     record = DischargeRecord(
         patient_id=patient_id,
-        encounter_id=encounter["id"],
+        encounter_id=first_encounter["id"],
         admit_ts=admit_ts,
         discharge_ts=discharge_ts,
         length_of_stay_days=los_days,
         age_at_discharge=calculate_age_years(patient["birthDate"], discharge_ts),
+        encounter_count=len(episode_encounters),
         admission_reason=(
-            encounter.get("reasonCode", [{}])[0].get("coding", [{}])[0].get("display", "unknown")
-            if encounter.get("reasonCode") else "unknown"
+            first_encounter.get("reasonCode", [{}])[0].get("coding", [{}])[0].get("display", "unknown")
+            if first_encounter.get("reasonCode") else "unknown"
         ),
-        discharge_disposition=encounter.get("hospitalization", {}).get("dischargeDisposition", {}).get("text"),
+        discharge_disposition=last_encounter.get("hospitalization", {}).get("dischargeDisposition", {}).get("text"),
         comorbidity_categories=categorize_conditions(active_conditions),
         medication_count=len(distinct_med_names),
         high_risk_med_flags=flag_high_risk_meds(med_names),
-        prior_admissions_90d=count_prior_admissions_90d(all_imp_encounters, encounter),
+        prior_admissions_90d=count_prior_episodes_90d(all_patient_episodes, episode, readmission_window_days=cfg.readmission_window_days),
         protected_attributes={"sex": patient.get("gender"), "race": race},
         discharge_note_text=note_text,
     )
 
     logger.debug(
-        "Built record: patient=%s encounter=%s age=%d LOS=%dd meds=%d comorbidities=%s",
-        patient_id, encounter["id"], record.age_at_discharge, record.length_of_stay_days,
+        "Built record: patient=%s episode_encounters=%d age=%d LOS=%dd meds=%d comorbidities=%s",
+        patient_id, record.encounter_count, record.age_at_discharge, record.length_of_stay_days,
         record.medication_count, record.comorbidity_categories,
     )
     return record
 
 
-def parse_bundle(path: str) -> tuple[list[DischargeRecord], str | None]:
+def parse_bundle(path: str, cfg: Config) -> tuple[list[DischargeRecord], str | None]:
     data = json.load(open(path))
     entries = [e["resource"] for e in data["entry"]]
     imp_encounters = get_inpatient_encounters(entries)
     if not imp_encounters:
         logger.debug("%s: no inpatient (IMP) encounters — skipped", os.path.basename(path))
         return [], None
-    logger.debug("%s: %d inpatient encounter(s) found", os.path.basename(path), len(imp_encounters))
-    records = [build_record(entries, enc, imp_encounters) for enc in imp_encounters]
+    episodes = cluster_encounters_into_episodes(imp_encounters, gap_threshold_hours=cfg.gap_threshold_hours)
+    if len(episodes) < len(imp_encounters):
+        logger.debug("%s: %d raw IMP encounters merged into %d genuine episode(s)",
+                     os.path.basename(path), len(imp_encounters), len(episodes))
+    records = [build_record(entries, ep, episodes, cfg) for ep in episodes]
     return records, None
 
 
-def parse_all_bundles(fhir_dir: str) -> tuple[list[DischargeRecord], list[dict]]:
+def parse_all_bundles(fhir_dir: str, cfg: Config | None = None) -> tuple[list[DischargeRecord], list[dict]]:
+    cfg = cfg or load_config()
     records, failures = [], []
     files = [f for f in os.listdir(fhir_dir) if not f.startswith(("hospitalInformation", "practitionerInformation"))]
-    logger.info("Starting parse: %d bundles in %s", len(files), fhir_dir)
+    logger.info("Starting parse: %d bundles in %s (gap_threshold=%dh, med_lookback=%dd, readmit_window=%dd)",
+                len(files), fhir_dir, cfg.gap_threshold_hours, cfg.medication_lookback_days, cfg.readmission_window_days)
 
     for i, fn in enumerate(files, start=1):
         try:
-            recs, _ = parse_bundle(os.path.join(fhir_dir, fn))
+            recs, _ = parse_bundle(os.path.join(fhir_dir, fn), cfg)
             records.extend(recs)
         except Exception as e:
             logger.error("Failed to parse %s: %s", fn, e, exc_info=True)
@@ -184,5 +188,6 @@ if __name__ == "__main__":
     from src.utils.logging_config import setup_logging
 
     setup_logging()
-    fhir_dir = sys.argv[1] if len(sys.argv) > 1 else "data/raw/fhir"
-    records, failures = parse_all_bundles(fhir_dir)
+    cfg = load_config()
+    fhir_dir = sys.argv[1] if len(sys.argv) > 1 else cfg.fhir_dir
+    records, failures = parse_all_bundles(fhir_dir, cfg)

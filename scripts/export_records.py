@@ -21,8 +21,10 @@ import pandas as pd
 
 sys.path.insert(0, ".")
 from src.ingestion.fhir_parser import parse_all_bundles
+from src.utils.config import load_config
 
-records, failures = parse_all_bundles("data/raw/fhir")
+cfg = load_config()
+records, failures = parse_all_bundles(cfg.fhir_dir, cfg)
 
 # --- Structured, tabular file for the risk model ---
 tabular_rows = []
@@ -37,10 +39,10 @@ for r in records:
     tabular_rows.append(row)
 
 df = pd.DataFrame(tabular_rows)
-df.to_csv("data/processed/discharge_records.csv", index=False)
+df.to_csv(cfg.output_csv, index=False)
 
 # --- Notes file for the retrieval agent / vector store ---
-with open("data/processed/discharge_notes.jsonl", "w") as f:
+with open(cfg.output_notes, "w") as f:
     for r in records:
         f.write(json.dumps({
             "encounter_id": r.encounter_id,
@@ -49,6 +51,6 @@ with open("data/processed/discharge_notes.jsonl", "w") as f:
             "note_text": r.discharge_note_text,
         }) + "\n")
 
-print(f"{len(df)} rows written to data/processed/discharge_records.csv (structured, no free text)")
-print(f"{len(records)} notes written to data/processed/discharge_notes.jsonl (for the vector store)")
+print(f"{len(df)} rows written to {cfg.output_csv} (structured, no free text)")
+print(f"{len(records)} notes written to {cfg.output_notes} (for the vector store)")
 print(f"Failures: {len(failures)}")
