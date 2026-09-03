@@ -29,3 +29,5 @@ class DischargeRecord:
     protected_attributes: dict[str, str] = field(default_factory=dict)
 
     discharge_note_text: str | None = None
+    deceased_date: str | None = None  # Patient.deceasedDateTime, if present — needed for
+                                        # competing-risk handling in target construction

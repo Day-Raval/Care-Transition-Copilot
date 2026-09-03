@@ -9,9 +9,12 @@ synthea:
   seed: 42
 
 episodes:
-  gap_threshold_hours: 6      # merge encounters into one stay if closer than this
+  gap_threshold_hours: 6      # merge encounters into one stay if closer than this time period
 
 features:
   medication_lookback_days: 180   # confirmed via testing: 90 misses real chronic
                                     # regimens with refill gaps, 365 pulls in noise
   readmission_window_days: 90     # for prior_admissions_90d
+
+target:
+  readmission_horizon_days: 30     # for target variable definition

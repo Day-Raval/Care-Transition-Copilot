@@ -131,6 +131,7 @@ def build_record(entries: list[dict], episode: dict, all_patient_episodes: list[
         prior_admissions_90d=count_prior_episodes_90d(all_patient_episodes, episode, readmission_window_days=cfg.readmission_window_days),
         protected_attributes={"sex": patient.get("gender"), "race": race},
         discharge_note_text=note_text,
+        deceased_date=patient.get("deceasedDateTime"),
     )
 
     logger.debug(
