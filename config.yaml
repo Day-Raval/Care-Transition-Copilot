@@ -5,7 +5,7 @@ data:
   output_notes: data/processed/discharge_notes.jsonl
 
 synthea:
-  population_size: 500
+  population_size: 3000
   seed: 42
 
 episodes:

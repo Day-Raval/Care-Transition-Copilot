@@ -1,29 +1,19 @@
 """
-Builds the rigorous 30-day readmission target — not the rough re-admission label.
+Builds the rigorous 30-day readmission target — not the rough label.
 
-Every episode gets exactly one of four outcomes:
+Outcomes: POSITIVE, NEGATIVE, DEATH, EXCLUDED — see prior day's docstring.
 
-  POSITIVE   — another episode for this patient started within
-               readmission_horizon_days after this discharge.
+PLANNED (refined): earlier version excluded any episode whose next episode
+shared the exact same admission_reason within the horizon. That correctly
+caught the lung cancer staging confound (89.3% of original positives were
+the same staging code repeating), but ALSO incorrectly swept up genuine
+same-diagnosis chronic-disease bounce-backs (confirmed: a CHF case and two
+cardiac valve cases were wrongly excluded this way) — which are arguably
+the canonical true-positive case a readmission model exists to catch.
 
-  NEGATIVE   — no readmission occurred, AND we can prove it: either the
-               dataset's observation cutoff is at least horizon days past
-               this discharge, or the patient's recorded death is at least
-               horizon days past this discharge. Either way, there was
-               enough time to observe a readmission if one were coming,
-               and none came.
-
-  DEATH      — the patient died within the horizon, before a readmission
-               could have occurred. This is a competing risk, not a
-               "negative" — dying is a different outcome than "stayed
-               healthy," and folding it into the negative class would
-               misrepresent both.
-
-  EXCLUDED   — none of the above: no readmission yet, but also not enough
-               time has passed since discharge (relative to the dataset's
-               own cutoff) to know whether one would have happened.
-               Labeling these as negative would be a real error (we
-               genuinely don't know), not a rounding choice.
+Narrowed to only exclude the specific confirmed pattern: same admission
+reason AND that reason is oncology staging/treatment language. A repeat
+CHF or valve-disease admission is no longer excluded.
 """
 
 import logging
@@ -33,37 +23,50 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+PLANNED_KEYWORDS = ["carcinoma", "malignant neoplasm", "chemotherapy", "radiation therapy"]
+# Deliberately narrow: only oncology staging/treatment language, the exact
+# pattern confirmed as the confound (lung cancer staging codes repeating
+# within days of themselves). A same-diagnosis repeat for a condition like
+# CHF or aortic valve disease is NOT excluded here — that's a genuine
+# unplanned bounce-back, arguably the canonical true-positive case a
+# readmission model exists to catch, and an earlier version of this rule
+# (any matching admission_reason, regardless of diagnosis) was incorrectly
+# sweeping a handful of those into PLANNED alongside the real confound.
+
+
+def _is_planned_pattern(admission_reason: str, next_admission_reason: str) -> bool:
+    same_reason = admission_reason == next_admission_reason
+    is_oncology = any(kw in admission_reason.lower() for kw in PLANNED_KEYWORDS)
+    return same_reason and is_oncology
+
 
 def get_dataset_cutoff(df: pd.DataFrame) -> datetime:
-    """The latest discharge in the whole dataset — our de facto 'today'."""
     return df["discharge_ts"].max()
 
 
 def build_target(df: pd.DataFrame, horizon_days: int, cutoff: datetime | None = None) -> pd.DataFrame:
-    """
-    df must have: patient_id, encounter_id, admit_ts, discharge_ts (parsed
-    datetimes), deceased_date (parsed datetime or NaT).
-    Returns df with four new columns: outcome, days_observed, event_observed, excluded.
-    """
     df = df.sort_values(["patient_id", "admit_ts"]).copy()
     cutoff = cutoff or get_dataset_cutoff(df)
 
     outcomes = []
     days_observed_list = []
-
     by_patient = {pid: g for pid, g in df.groupby("patient_id")}
 
     for _, row in df.iterrows():
         patient_episodes = by_patient[row["patient_id"]]
         others = patient_episodes[patient_episodes["encounter_id"] != row["encounter_id"]]
-
         future = others[others["admit_ts"] > row["discharge_ts"]]
         gap_to_next = None
+        next_ep = None
         if not future.empty:
             next_ep = future.loc[future["admit_ts"].idxmin()]
             gap_to_next = (next_ep["admit_ts"] - row["discharge_ts"]).total_seconds() / 86400
 
         if gap_to_next is not None and gap_to_next <= horizon_days:
+            if _is_planned_pattern(row["admission_reason"], next_ep["admission_reason"]):
+                outcomes.append("PLANNED")
+                days_observed_list.append(gap_to_next)
+                continue
             outcomes.append("POSITIVE")
             days_observed_list.append(gap_to_next)
             continue
@@ -87,7 +90,7 @@ def build_target(df: pd.DataFrame, horizon_days: int, cutoff: datetime | None = 
     df["outcome"] = outcomes
     df["days_observed"] = days_observed_list
     df["event_observed"] = df["outcome"] == "POSITIVE"
-    df["excluded"] = df["outcome"] == "EXCLUDED"
+    df["excluded"] = df["outcome"].isin(["EXCLUDED", "PLANNED"])
     return df
 
 
@@ -95,15 +98,13 @@ def summarize(df: pd.DataFrame) -> None:
     n = len(df)
     counts = df["outcome"].value_counts()
     print(f"Total episodes: {n}")
-    for outcome in ["POSITIVE", "NEGATIVE", "DEATH", "EXCLUDED"]:
+    for outcome in ["POSITIVE", "NEGATIVE", "DEATH", "PLANNED", "EXCLUDED"]:
         c = counts.get(outcome, 0)
         print(f"  {outcome:<10} {c:>4}  ({100*c/n:.1f}%)")
-
     modeling_set = df[df["outcome"].isin(["POSITIVE", "NEGATIVE"])]
     if len(modeling_set):
         pos_rate = (modeling_set["outcome"] == "POSITIVE").mean()
-        print(f"\nUsable for modeling (POSITIVE + NEGATIVE only): {len(modeling_set)} episodes")
-        print(f"True positive rate among those: {100*pos_rate:.1f}%")
+        print(f"\nUsable for modeling: {len(modeling_set)} episodes, positive rate {100*pos_rate:.1f}%")
 
 
 if __name__ == "__main__":
