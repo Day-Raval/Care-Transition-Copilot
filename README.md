@@ -11,7 +11,7 @@ Hospitals often know which discharged patients are at elevated readmission risk,
 but the risk score, patient context, and follow-up plan usually live in separate
 systems. This project connects those pieces into one workflow: predict who is at
 risk, retrieve the clinical context, draft a follow-up plan, and route it through
-clinician review before action.
+clinician review before action. 
 
 ## What this is
 
@@ -43,7 +43,12 @@ loop.
 6. Approved plans are written back to the record and used for patient follow-up.
 7. Outcomes feed back into the data layer for monitoring and improvement.
 
-## Architecture
+## Target architecture
+
+The diagram below shows the intended end-to-end architecture. The current codebase
+has implemented the local synthetic-data, ingestion, feature, target-labeling, and
+baseline-modeling pieces first; API serving, agent orchestration, persistence
+services, and the clinician UI are still planned work.
 
 ```mermaid
 flowchart TB
@@ -116,17 +121,17 @@ flowchart TB
     class security,operations,quality control;
 ```
 
-- **Data** - FHIR/HL7v2 discharge events flow through Kafka into Postgres for
-  structured data and ChromaDB for clinical text retrieval.
-- **Prediction** - a scikit-survival or lifelines model scores readmission risk,
-  with SHAP explanations and Fairlearn/Aequitas subgroup audits.
-- **Agents** - LangGraph coordinates retrieval, care-plan drafting, critique,
-  explanation, and clinician handoff.
-- **Review and action** - a clinician-facing app keeps AI output in draft state
-  until approval, then writes the plan back through FHIR and sends follow-up
-  notifications.
-- **Platform services** - OAuth2/RBAC, audit logging, monitoring, CI/CD, drift
-  checks, retries, and circuit breakers support the workflow.
+- **Implemented data path** - synthetic FHIR bundles are parsed into canonical
+  discharge episodes, structured CSV features, and JSONL discharge-note records.
+- **Implemented prediction path** - a baseline Cox proportional hazards model
+  trains on the labeled positive/negative episodes with a patient-grouped split.
+- **Planned agents** - LangGraph will coordinate retrieval, care-plan drafting,
+  critique, explanation, and clinician handoff.
+- **Planned review and action** - a clinician-facing app will keep AI output in
+  draft state until approval, then write the plan back through FHIR and send
+  follow-up notifications.
+- **Planned platform services** - OAuth2/RBAC, audit logging, monitoring, CI/CD,
+  drift checks, retries, and circuit breakers support the workflow.
 
 ## Application scope
 
@@ -136,6 +141,35 @@ The MVP focuses on four user-facing capabilities:
 - Clinical context retrieval with source citations.
 - Care-plan orchestration with draft, critique, and explanation steps.
 - Clinician actions to approve, edit, reject, notify, or open the patient portal.
+
+## Implemented progress
+
+The current repository shows the first stage of the MVP working locally:
+
+- Parsed inpatient-only Synthea FHIR bundles into a canonical
+  `DischargeRecord` schema.
+- Clustered raw inpatient encounters into hospitalization episodes so same-stay
+  encounters are not counted as readmissions.
+- Added time-aware condition and medication filters to avoid using data that was
+  not known at discharge.
+- Engineered structured predictors: length of stay, age at discharge,
+  medication burden, high-risk medication flags, comorbidity categories, prior
+  admissions, and protected attributes for later fairness evaluation.
+- Exported free-text discharge notes separately to `discharge_notes.jsonl` so
+  retrieval work can use notes without leaking text into tabular model inputs.
+- Built a rigorous 30-day readmission target with positive, negative, death,
+  planned, and excluded outcomes.
+- Added a baseline Cox proportional hazards model with a patient-grouped
+  train/test split and coefficient/hazard-ratio reporting.
+
+Committed processed data currently includes:
+
+| Artifact | Current contents |
+| -------- | -----------------|
+| `data/processed/discharge_records.csv` | 3,110 inpatient episodes from 1,341 patients |
+| `data/processed/discharge_notes.jsonl` | 3,110 discharge-note records keyed by encounter |
+| `data/processed/discharge_records_with_target.csv` | 2,593 negative, 52 positive, 380 planned, 60 death, and 25 excluded outcomes |
+| Modeling set | 2,645 positive/negative episodes from 1,328 patients |
 
 ## Clinician UI
 
@@ -149,18 +183,19 @@ Design principles from the proposal:
 
 ## Status
 
-MVP in progress. The proposal scopes a four-week build: synthetic data and
-baseline modeling, fairness audit and RAG retrieval, agent orchestration with
-failure recovery, then a clinician-facing demo with end-to-end test episodes.
+MVP in progress. The data ingestion, feature export, target construction, and
+baseline survival model are implemented. Next milestones are fairness auditing,
+note chunking/vector indexing, retrieval with citations, agent orchestration,
+API serving, and a clinician-facing demo workflow.
 
 ## Getting started
 
 ### Prerequisites
 
-- Python 3.11+
-- Docker + Docker Compose
+- Python 3.12+
+- `uv` or `pip`
 - Java 11+ (for Synthea, the synthetic data generator)
-- `uv` (or `poetry`) for dependency management
+- Docker + Docker Compose for the planned Postgres, ChromaDB, and Redis services
 
 ### Setup
 
@@ -172,41 +207,58 @@ cd care-transition-copilot
 # 2. Copy env template and fill in real values
 cp .env.example .env
 
-# 3. Start the data layer (Postgres, ChromaDB, Redis)
-docker compose up -d
+# 3. Install Python dependencies
+uv pip install -r requirements.txt
+# or:
+pip install -r requirements.txt
 
-# 4. Install Python dependencies
-uv sync   # or: poetry install
-
-# 5. Generate synthetic patient data
+# 4. Generate synthetic patient data
 ./scripts/generate_synthetic_data.sh
 
-# 6. Run the ingestion pipeline on the generated data
-python -m src.ingestion.fhir_parser
+# 5. Export structured records and discharge notes
+python scripts/export_records.py
+
+# 6. Build the 30-day readmission target
+python -m src.features.target
+
+# 7. Train and inspect the baseline survival model
+python -m src.model.train_baseline
 ```
 
-### Running the API
+### Useful analysis scripts
 
 ```bash
-uvicorn src.api.main:app --reload --port 8080
+python scripts/EDA.py
+python scripts/check_resources.py
+python scripts/check_comorbidity.py
+python scripts/check_multicollinearity.py
 ```
 
 ### Running tests
 
-```bash
-pytest tests/
-```
+Automated tests have not been added yet. Current validation is done through the
+analysis scripts above and manual inspection of sample inpatient bundles.
 
 ## Project structure
 
 ```text
 src/
-├── ingestion/    # HL7v2 / FHIR parsing -> canonical DischargeRecord
-├── features/     # Feature engineering (comorbidity grouping, med flags, etc.)
-├── model/        # Risk model training + SHAP + Fairlearn audit
-├── agents/       # LangGraph orchestrator + retrieval/reasoning/critique agents
-├── api/          # FastAPI service (Model Serving API)
-└── frontend/     # Clinician-facing web app
+|-- ingestion/    # FHIR parsing, temporal filters, episode clustering
+|-- features/     # 30-day target construction
+|-- model/        # Baseline Cox model training and interpretation
+`-- utils/        # Config and logging helpers
+
+scripts/
+|-- export_records.py              # Structured CSV + notes JSONL export
+|-- EDA.py                         # Exploratory checks on processed records
+|-- check_resources.py             # Raw FHIR resource inventory
+|-- check_comorbidity.py           # Feature sanity checks
+`-- check_multicollinearity.py     # Correlation diagnostics
+
+data/
+|-- samples/                       # Example synthetic patient bundles
+|-- samples_inpatient/             # Inpatient-focused review samples
+`-- processed/                     # CSV/JSONL outputs used by modeling
 ```
 
 ## Data
@@ -220,12 +272,12 @@ or data use agreement is required to run or demo it. See
 
 | Layer | Tools |
 | --- | --- |
-| Risk model | scikit-survival or lifelines, SHAP, Fairlearn or Aequitas |
-| API | FastAPI |
-| Agents | LangGraph, LlamaIndex or LangChain, Groq/OpenAI-compatible LLMs |
-| Data | Postgres, ChromaDB, Redis, Kafka |
-| Frontend | React or Streamlit for MVP |
-| Notifications | Twilio or patient portal stub |
+| Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
+| Planned API | FastAPI, Uvicorn |
+| Planned agents/retrieval | LangGraph, LlamaIndex or LangChain, ChromaDB, Groq/OpenAI-compatible LLMs |
+| Planned data services | Postgres, Redis, Kafka |
+| Planned frontend | React or Streamlit for MVP |
+| Planned notifications | Twilio or patient portal stub |
 
 ## Success criteria
 
