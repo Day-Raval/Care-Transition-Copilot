@@ -124,7 +124,9 @@ flowchart TB
 - **Implemented data path** - synthetic FHIR bundles are parsed into canonical
   discharge episodes, structured CSV features, and JSONL discharge-note records.
 - **Implemented prediction path** - a baseline Cox proportional hazards model
-  trains on the labeled positive/negative episodes with a patient-grouped split.
+  trains on the labeled positive/negative episodes with a patient-grouped split,
+  and model-comparison diagnostics evaluate Cox, Random Survival Forest, and
+  Gradient Boosting survival configurations with patient-grouped cross-validation.
 - **Planned agents** - LangGraph will coordinate retrieval, care-plan drafting,
   critique, explanation, and clinician handoff.
 - **Planned review and action** - a clinician-facing app will keep AI output in
@@ -161,6 +163,13 @@ The current repository shows the first stage of the MVP working locally:
   planned, and excluded outcomes.
 - Added a baseline Cox proportional hazards model with a patient-grouped
   train/test split and coefficient/hazard-ratio reporting.
+- Added grouped cross-validation for model comparison across regularized Cox,
+  Random Survival Forest, and Gradient Boosting Survival Analysis candidates.
+  The comparison reports mean C-index, standard deviation, usable fold count,
+  and per-fold scores so small-sample variance is visible.
+- Added a comorbidity-count diagnostic that compares Cox performance with and
+  without `comorbidity_count`, helping decide whether to keep the feature out
+  for interpretability or restore it for stronger risk ranking.
 
 Committed processed data currently includes:
 
@@ -183,10 +192,20 @@ Design principles from the proposal:
 
 ## Status
 
-MVP in progress. The data ingestion, feature export, target construction, and
-baseline survival model are implemented. Next milestones are fairness auditing,
-note chunking/vector indexing, retrieval with citations, agent orchestration,
-API serving, and a clinician-facing demo workflow.
+MVP in progress. The local data and modeling foundation is now implemented:
+FHIR ingestion, hospitalization episode construction, feature export, 30-day
+target labeling, baseline Cox survival modeling, and patient-grouped
+cross-validation for comparing Cox, Random Survival Forest, and Gradient
+Boosting survival candidates.
+
+The current modeling work is still diagnostic rather than production-ready. The
+dataset has only 52 positive readmission events, so the comparison workflow
+surfaces mean C-index, fold-to-fold standard deviation, and per-fold scores
+instead of treating any single split as definitive.
+
+Next milestones are fairness auditing, note chunking/vector indexing, retrieval
+with citations, agent orchestration, API serving, and a clinician-facing demo
+workflow.
 
 ## Getting started
 
@@ -223,6 +242,9 @@ python -m src.features.target
 
 # 7. Train and inspect the baseline survival model
 python -m src.model.train_baseline
+
+# 8. Compare survival model families with grouped cross-validation
+python -m src.model.compare_models
 ```
 
 ### Useful analysis scripts
@@ -232,6 +254,8 @@ python scripts/EDA.py
 python scripts/check_resources.py
 python scripts/check_comorbidity.py
 python scripts/check_multicollinearity.py
+python scripts/compare_comorbidity_inclusion.py
+python -m src.model.compare_models
 ```
 
 ### Running tests
@@ -245,7 +269,7 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 src/
 |-- ingestion/    # FHIR parsing, temporal filters, episode clustering
 |-- features/     # 30-day target construction
-|-- model/        # Baseline Cox model training and interpretation
+|-- model/        # Cox baseline training plus model-comparison diagnostics
 `-- utils/        # Config and logging helpers
 
 scripts/
@@ -253,7 +277,8 @@ scripts/
 |-- EDA.py                         # Exploratory checks on processed records
 |-- check_resources.py             # Raw FHIR resource inventory
 |-- check_comorbidity.py           # Feature sanity checks
-`-- check_multicollinearity.py     # Correlation diagnostics
+|-- check_multicollinearity.py     # Correlation diagnostics
+`-- compare_comorbidity_inclusion.py # CV check for comorbidity_count
 
 data/
 |-- samples/                       # Example synthetic patient bundles
