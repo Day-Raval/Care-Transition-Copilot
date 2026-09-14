@@ -1,0 +1,43 @@
+Fairness Audit — 2026-09-14 11:30
+
+Auditing on the held-out test set: 678 episodes, 12 positive events
+
+======================================================================
+FAIRNESS AUDIT: SEX
+======================================================================
+(Decision threshold: top 20% highest risk score, same cutoff = 2.362 applied to every group)
+
+female                                        n=421   events=9  
+    C-index:              0.744
+    Flagged as high-risk: 16.2%
+    Recall (caught):      55.6%
+    False negative rate:  44.4%  (truly high-risk patients who were NOT flagged)
+male                                          n=257   events=3   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+
+Sex: fewer than 2 groups had enough events to compare — cannot draw a fairness conclusion either way for this attribute yet.
+
+======================================================================
+FAIRNESS AUDIT: RACE
+======================================================================
+(Decision threshold: top 20% highest risk score, same cutoff = 2.362 applied to every group)
+
+American Indian or Alaska Native              n=5     events=0   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+Asian                                         n=69    events=0   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+Black or African American                     n=55    events=2   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+Native Hawaiian or Other Pacific Islander     n=1     events=0   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+Other                                         n=6     events=0   -> TOO FEW EVENTS TO AUDIT RELIABLY (need >=5)
+White                                         n=542   events=10 
+    C-index:              0.691
+    Flagged as high-risk: 20.7%
+    Recall (caught):      50.0%
+    False negative rate:  50.0%  (truly high-risk patients who were NOT flagged)
+
+Race: fewer than 2 groups had enough events to compare — cannot draw a fairness conclusion either way for this attribute yet.
+
+======================================================================
+CONCLUSION
+======================================================================
+Sex: INCONCLUSIVE — only 'female' had enough events (>=5) to audit. No other group could be compared against it.
+Race: INCONCLUSIVE — only 'White' had enough events (>=5) to audit. No other group could be compared against it.
+
+This model's fairness has NOT been validated across sex or race at the current dataset size. This is not a negative finding about the model — it is an absence of enough data to check. Do not represent this model as 'fairness-audited' or 'bias-checked' in any writeup, demo, or documentation until this becomes determinate. The audit infrastructure is built and working correctly; it needs a larger population to produce an answer.
