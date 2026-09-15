@@ -13,3 +13,6 @@ scripts/*.jar
 
 #logging
 logs/
+
+# Trained models
+models/*.joblib
