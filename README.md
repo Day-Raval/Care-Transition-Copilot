@@ -45,10 +45,11 @@ loop.
 
 ## Target architecture
 
-The diagram below shows the intended end-to-end architecture. The current codebase
-has implemented the local synthetic-data, ingestion, feature, target-labeling, and
-baseline-modeling pieces first; API serving, agent orchestration, persistence
-services, and the clinician UI are still planned work.
+The diagram below shows the intended end-to-end architecture. The current
+codebase has implemented the local synthetic-data, ingestion, feature,
+target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
+and risk-model API pieces first. Agent orchestration, persistence services, and
+the clinician UI are still planned work.
 
 ```mermaid
 flowchart TB
@@ -124,16 +125,22 @@ flowchart TB
 - **Implemented data path** - synthetic FHIR bundles are parsed into canonical
   discharge episodes, structured CSV features, and JSONL discharge-note records.
 - **Implemented prediction path** - a baseline Cox proportional hazards model
-  trains on the labeled positive/negative episodes with a patient-grouped split,
-  and model-comparison diagnostics evaluate Cox, Random Survival Forest, and
-  Gradient Boosting survival configurations with patient-grouped cross-validation.
+  trains on the labeled positive/negative episodes with a patient-grouped split.
+  Model-comparison diagnostics evaluate Cox, Random Survival Forest, and
+  Gradient Boosting survival configurations with patient-grouped
+  cross-validation. The current configured production run is
+  `20260915_113931_cdd23e`.
+- **Implemented serving path** - FastAPI serves the configured saved model, builds
+  the `/predict` request schema from that model's saved feature list, logs live
+  predictions, and exposes a drift report against the training reference
+  distribution.
 - **Planned agents** - LangGraph will coordinate retrieval, care-plan drafting,
   critique, explanation, and clinician handoff.
 - **Planned review and action** - a clinician-facing app will keep AI output in
   draft state until approval, then write the plan back through FHIR and send
   follow-up notifications.
-- **Planned platform services** - OAuth2/RBAC, audit logging, monitoring, CI/CD,
-  drift checks, retries, and circuit breakers support the workflow.
+- **Planned platform services** - OAuth2/RBAC, full audit logging, CI/CD,
+  production monitoring, retries, and circuit breakers support the workflow.
 
 ## Application scope
 
@@ -170,6 +177,18 @@ The current repository shows the first stage of the MVP working locally:
 - Added a comorbidity-count diagnostic that compares Cox performance with and
   without `comorbidity_count`, helping decide whether to keep the feature out
   for interpretability or restore it for stronger risk ranking.
+- Added a lightweight experiment registry in `results/experiments.csv`, with
+  every logged run tied to a saved `models/{run_id}.joblib` artifact. The saved
+  model artifacts are regenerable and gitignored.
+- Added `src.model.compare_experiments` to compare logged runs side by side and
+  flag likely overfitting when the train/test C-index gap is greater than 0.15.
+- Added a fairness audit for sex and race subgroup performance. At the current
+  event count it is intentionally reported as inconclusive, not as a passed
+  fairness validation.
+- Added a FastAPI risk-model service with `/health`, `/model-info`, `/predict`,
+  and `/drift-report` endpoints. The prediction request schema is generated from
+  the loaded model's actual feature list, so changing `model.production_run_id`
+  in `config.yaml` updates the served schema on restart.
 
 Committed processed data currently includes:
 
@@ -179,6 +198,22 @@ Committed processed data currently includes:
 | `data/processed/discharge_notes.jsonl` | 3,110 discharge-note records keyed by encounter |
 | `data/processed/discharge_records_with_target.csv` | 2,593 negative, 52 positive, 380 planned, 60 death, and 25 excluded outcomes |
 | Modeling set | 2,645 positive/negative episodes from 1,328 patients |
+
+Latest model-comparison summary:
+
+| Model/configuration | Mean C-index | Std | Notes |
+| --- | ---: | ---: | --- |
+| Cox, `alpha=5.0` | 0.736 | 0.084 | Best cross-validated mean |
+| Cox, `alpha=1.0` | 0.732 | 0.085 | Chosen baseline for interpretability and registry/API consistency |
+| Best Random Survival Forest | 0.721 | 0.072 | Did not beat Cox enough to justify added complexity |
+| Best Gradient Boosting Survival Analysis | 0.691 | 0.091 | Lower mean and higher variance |
+
+The official baseline v1 registry run is `20260915_113931_cdd23e`: Cox
+Proportional Hazards, `alpha=1.0`, six features, 1,967 train episodes, 678 test
+episodes, 40 train events, 12 test events, and train/test C-index
+`0.7757 / 0.6844`. The single split is noisier than the grouped CV summary, so
+the README and `results/RESULTS.md` treat the CV comparison as the more reliable
+model-selection evidence.
 
 ## Clinician UI
 
@@ -192,20 +227,23 @@ Design principles from the proposal:
 
 ## Status
 
-MVP in progress. The local data and modeling foundation is now implemented:
-FHIR ingestion, hospitalization episode construction, feature export, 30-day
-target labeling, baseline Cox survival modeling, and patient-grouped
+MVP in progress. The local data, modeling, and first serving layer are now
+implemented: FHIR ingestion, hospitalization episode construction, feature
+export, 30-day target labeling, baseline Cox survival modeling, patient-grouped
 cross-validation for comparing Cox, Random Survival Forest, and Gradient
-Boosting survival candidates.
+Boosting survival candidates, experiment logging/model saving, fairness-audit
+infrastructure, and a FastAPI wrapper for the configured model run.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
 surfaces mean C-index, fold-to-fold standard deviation, and per-fold scores
-instead of treating any single split as definitive.
+instead of treating any single split as definitive. The fairness audit is also
+inconclusive at this dataset size because most protected subgroups do not have
+enough positive events for a reliable comparison.
 
-Next milestones are fairness auditing, note chunking/vector indexing, retrieval
-with citations, agent orchestration, API serving, and a clinician-facing demo
-workflow.
+Next milestones are scaling the synthetic population for a determinate fairness
+audit, note chunking/vector indexing, retrieval with citations, agent
+orchestration, persistence/audit services, and a clinician-facing demo workflow.
 
 ## Getting started
 
@@ -245,7 +283,74 @@ python -m src.model.train_baseline
 
 # 8. Compare survival model families with grouped cross-validation
 python -m src.model.compare_models
+
+# 9. Log a reproducible baseline run and saved model artifact
+python -m src.model.run_experiment --alpha 1.0 --notes "baseline, 6 features"
+
+# 10. Compare logged experiment-registry runs
+python -m src.model.compare_experiments
+
+# 11. Run the fairness audit
+python -m src.model.fairness_audit
+
+# 12. Serve the configured model run from config.yaml
+uvicorn src.api.main:app --reload
 ```
+
+### API smoke tests
+
+After starting the API with `uvicorn src.api.main:app --reload`, open the
+interactive docs at `http://127.0.0.1:8000/docs` or run these commands.
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+
+Invoke-RestMethod http://127.0.0.1:8000/model-info
+
+$body = @{
+  age_at_discharge = 72
+  length_of_stay_days = 5
+  medication_count = 9
+  prior_admissions_90d = 1
+  med_flag_diuretic = $true
+  med_flag_anticoagulant = $false
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8000/predict `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $body
+
+Invoke-RestMethod http://127.0.0.1:8000/drift-report
+```
+
+Bash/curl:
+
+```bash
+curl http://127.0.0.1:8000/health
+
+curl http://127.0.0.1:8000/model-info
+
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "age_at_discharge": 72,
+    "length_of_stay_days": 5,
+    "medication_count": 9,
+    "prior_admissions_90d": 1,
+    "med_flag_diuretic": true,
+    "med_flag_anticoagulant": false
+  }'
+
+curl http://127.0.0.1:8000/drift-report
+```
+
+`/predict` returns a relative Cox risk score, percentile, and low/medium/high
+risk category. `/drift-report` needs at least 30 logged predictions before it
+can make a meaningful drift assessment.
 
 ### Useful analysis scripts
 
@@ -256,6 +361,9 @@ python scripts/check_comorbidity.py
 python scripts/check_multicollinearity.py
 python scripts/compare_comorbidity_inclusion.py
 python -m src.model.compare_models
+python -m src.model.run_experiment --alpha 1.0 --notes "baseline, 6 features"
+python -m src.model.compare_experiments
+python -m src.model.fairness_audit
 ```
 
 ### Running tests
@@ -267,9 +375,10 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 
 ```text
 src/
+|-- api/          # FastAPI model serving, dynamic request schema, drift report
 |-- ingestion/    # FHIR parsing, temporal filters, episode clustering
 |-- features/     # 30-day target construction
-|-- model/        # Cox baseline training plus model-comparison diagnostics
+|-- model/        # Cox baseline, experiment registry, fairness/model comparison
 `-- utils/        # Config and logging helpers
 
 scripts/
@@ -284,6 +393,14 @@ data/
 |-- samples/                       # Example synthetic patient bundles
 |-- samples_inpatient/             # Inpatient-focused review samples
 `-- processed/                     # CSV/JSONL outputs used by modeling
+
+results/
+|-- RESULTS.md                     # Narrative summary of current model findings
+|-- experiments.csv                # Logged training runs
+`-- fairness_audit_*.txt           # Timestamped fairness-audit reports
+
+models/
+`-- *.joblib                       # Saved run artifacts, gitignored/regenerable
 ```
 
 ## Data
@@ -298,7 +415,7 @@ or data use agreement is required to run or demo it. See
 | Layer | Tools |
 | --- | --- |
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
-| Planned API | FastAPI, Uvicorn |
+| Implemented API | FastAPI, Uvicorn, Pydantic |
 | Planned agents/retrieval | LangGraph, LlamaIndex or LangChain, ChromaDB, Groq/OpenAI-compatible LLMs |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned frontend | React or Streamlit for MVP |
