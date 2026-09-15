@@ -18,3 +18,6 @@ features:
 
 target:
   readmission_horizon_days: 30     # for target variable definition
+
+model:
+  production_run_id: "20260915_113931_cdd23e"

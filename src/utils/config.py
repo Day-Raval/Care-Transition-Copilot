@@ -18,6 +18,7 @@ class Config:
     medication_lookback_days: int = 180
     readmission_window_days: int = 90
     readmission_horizon_days: int = 30
+    production_run_id: str = ""
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -33,4 +34,5 @@ def load_config(path: str = "config.yaml") -> Config:
         medication_lookback_days=raw.get("features", {}).get("medication_lookback_days", Config.medication_lookback_days),
         readmission_window_days=raw.get("features", {}).get("readmission_window_days", Config.readmission_window_days),
         readmission_horizon_days=raw.get("target", {}).get("readmission_horizon_days", Config.readmission_horizon_days),
+        production_run_id=raw.get("model", {}).get("production_run_id", Config.production_run_id),
     )

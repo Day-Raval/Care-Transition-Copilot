@@ -16,3 +16,4 @@ logs/
 
 # Trained models
 models/*.joblib
+results/prediction_log.csv
