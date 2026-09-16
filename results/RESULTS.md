@@ -140,6 +140,27 @@ comparison becomes possible at the current ~2% event rate.
 
 ---
 
+## Vector Store — Section-Aware Chunking (resolved)
+Original whole-note embedding diluted background/comorbidity mentions
+(e.g. CHF history) when they weren't the encounter's chief complaint —
+confirmed via scripts/check_chf_notes.py (108 notes mentioned heart
+failure, none surfaced for a direct CHF query). Fixed via section-aware
+chunking (split by note headers: Chief Complaint, HPI, Plan, etc.),
+Preamble removal (100% redundant with discharge_ts metadata), and merging
+of trivially short sections that were winning matches by being generic
+rather than relevant.
+
+Confirmed working: chest pain and CHF-procedure queries now surface
+genuinely relevant content. Patient-scoped retrieval (src/retrieval/
+query_store.py) adds a relevance distance threshold (1.1, uncalibrated —
+revisit with real usage) so a query with no genuine match returns "no
+relevant history found" rather than forcing out an unrelated chunk —
+confirmed correct on a patient with no CHF history. Positive-case
+confirmation (a real CHF patient correctly surfacing relevant content)
+is the one remaining validation step before the retrieval agent build.
+
+--- 
+
 ## Next steps
 
 1. Wrap the chosen model (`cox_baseline_v1.joblib` equivalent, logged in

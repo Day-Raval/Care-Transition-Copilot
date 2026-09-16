@@ -17,3 +17,6 @@ logs/
 # Trained models
 models/*.joblib
 results/prediction_log.csv
+
+# Chroma database for vector store
+data/processed/chroma_db/
