@@ -48,8 +48,9 @@ loop.
 The diagram below shows the intended end-to-end architecture. The current
 codebase has implemented the local synthetic-data, ingestion, feature,
 target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
-and risk-model API pieces first. Agent orchestration, persistence services, and
-the clinician UI are still planned work.
+section-aware note chunking, vector-store indexing, and risk-model API pieces
+first. Agent orchestration, persistence services, and the clinician UI are still
+planned work.
 
 ```mermaid
 flowchart TB
@@ -134,6 +135,9 @@ flowchart TB
   the `/predict` request schema from that model's saved feature list, logs live
   predictions, and exposes a drift report against the training reference
   distribution.
+- **Implemented retrieval foundation** - discharge notes are split into
+  section-aware chunks, embedded into a local persistent ChromaDB collection, and
+  validated with open-corpus and patient-scoped retrieval checks.
 - **Planned agents** - LangGraph will coordinate retrieval, care-plan drafting,
   critique, explanation, and clinician handoff.
 - **Planned review and action** - a clinician-facing app will keep AI output in
@@ -189,6 +193,17 @@ The current repository shows the first stage of the MVP working locally:
   and `/drift-report` endpoints. The prediction request schema is generated from
   the loaded model's actual feature list, so changing `model.production_run_id`
   in `config.yaml` updates the served schema on restart.
+- Added section-aware discharge-note chunking in `src.embeddings.chunking`.
+  Notes are split on clinical headers such as chief complaint, history, and
+  assessment/plan instead of embedding whole notes, so secondary conditions are
+  not diluted by unrelated note sections.
+- Added a local ChromaDB vector-store build in `src.embeddings.build_vector_store`
+  and validation in `src.embeddings.validate_vector_store`. The vector database
+  is stored at `data/processed/chroma_db/`, is gitignored, and can be rebuilt
+  from `data/processed/discharge_notes.jsonl`.
+- Added retrieval diagnostics for CHF mention coverage and patient-scoped
+  retrieval behavior in `scripts/check_chf_notes.py`,
+  `scripts/check_patient_chf_history.py`, and `scripts/test_scoped_retrieval.py`.
 
 Committed processed data currently includes:
 
@@ -215,6 +230,16 @@ episodes, 40 train events, 12 test events, and train/test C-index
 the README and `results/RESULTS.md` treat the CV comparison as the more reliable
 model-selection evidence.
 
+Latest retrieval/vector-store summary:
+
+| Component | Current behavior |
+| --- | --- |
+| Chunking | Splits discharge notes by markdown-style clinical section headers and drops date-only preambles |
+| Short sections | Merges tiny boilerplate sections into neighboring content before embedding |
+| Vector store | Builds a persistent ChromaDB collection named `discharge_notes` under `data/processed/chroma_db/` |
+| Embeddings | Uses ChromaDB's default local embedding function; first run may download the model cache |
+| Validation | Runs broad clinical queries and patient-scoped retrieval checks with metadata inspection |
+
 ## Clinician UI
 
 ![Clinician review concept](Docs/readme_clinician_review.svg)
@@ -227,12 +252,13 @@ Design principles from the proposal:
 
 ## Status
 
-MVP in progress. The local data, modeling, and first serving layer are now
-implemented: FHIR ingestion, hospitalization episode construction, feature
-export, 30-day target labeling, baseline Cox survival modeling, patient-grouped
-cross-validation for comparing Cox, Random Survival Forest, and Gradient
-Boosting survival candidates, experiment logging/model saving, fairness-audit
-infrastructure, and a FastAPI wrapper for the configured model run.
+MVP in progress. The local data, modeling, retrieval foundation, and first
+serving layer are now implemented: FHIR ingestion, hospitalization episode
+construction, feature export, 30-day target labeling, baseline Cox survival
+modeling, patient-grouped cross-validation for comparing Cox, Random Survival
+Forest, and Gradient Boosting survival candidates, experiment logging/model
+saving, fairness-audit infrastructure, section-aware note chunking, ChromaDB
+vector-store indexing, and a FastAPI wrapper for the configured model run.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -242,7 +268,7 @@ inconclusive at this dataset size because most protected subgroups do not have
 enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
-audit, note chunking/vector indexing, retrieval with citations, agent
+audit, adding a retrieval-agent interface with source citations, agent
 orchestration, persistence/audit services, and a clinician-facing demo workflow.
 
 ## Getting started
@@ -252,7 +278,9 @@ orchestration, persistence/audit services, and a clinician-facing demo workflow.
 - Python 3.12+
 - `uv` or `pip`
 - Java 11+ (for Synthea, the synthetic data generator)
-- Docker + Docker Compose for the planned Postgres, ChromaDB, and Redis services
+- Docker + Docker Compose for the planned Postgres and Redis services
+- Network access on the first vector-store build so ChromaDB can cache its
+  default local embedding model
 
 ### Setup
 
@@ -293,7 +321,12 @@ python -m src.model.compare_experiments
 # 11. Run the fairness audit
 python -m src.model.fairness_audit
 
-# 12. Serve the configured model run from config.yaml
+# 12. Build and validate the discharge-note vector store
+python -m src.embeddings.build_vector_store
+python -m src.embeddings.validate_vector_store
+python scripts/test_scoped_retrieval.py
+
+# 13. Serve the configured model run from config.yaml
 uvicorn src.api.main:app --reload
 ```
 
@@ -364,6 +397,11 @@ python -m src.model.compare_models
 python -m src.model.run_experiment --alpha 1.0 --notes "baseline, 6 features"
 python -m src.model.compare_experiments
 python -m src.model.fairness_audit
+python -m src.embeddings.build_vector_store
+python -m src.embeddings.validate_vector_store
+python scripts/check_chf_notes.py
+python scripts/check_patient_chf_history.py <patient_id>
+python scripts/test_scoped_retrieval.py
 ```
 
 ### Running tests
@@ -376,6 +414,7 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 ```text
 src/
 |-- api/          # FastAPI model serving, dynamic request schema, drift report
+|-- embeddings/   # Section-aware note chunking and Chroma vector-store build
 |-- ingestion/    # FHIR parsing, temporal filters, episode clustering
 |-- features/     # 30-day target construction
 |-- model/        # Cox baseline, experiment registry, fairness/model comparison
@@ -387,12 +426,15 @@ scripts/
 |-- check_resources.py             # Raw FHIR resource inventory
 |-- check_comorbidity.py           # Feature sanity checks
 |-- check_multicollinearity.py     # Correlation diagnostics
-`-- compare_comorbidity_inclusion.py # CV check for comorbidity_count
+|-- compare_comorbidity_inclusion.py # CV check for comorbidity_count
+|-- check_chf_notes.py             # Exact-text CHF mention coverage check
+|-- check_patient_chf_history.py   # Patient-specific condition mention check
+`-- test_scoped_retrieval.py       # Patient-scoped vector retrieval smoke test
 
 data/
 |-- samples/                       # Example synthetic patient bundles
 |-- samples_inpatient/             # Inpatient-focused review samples
-`-- processed/                     # CSV/JSONL outputs used by modeling
+`-- processed/                     # CSV/JSONL outputs and local Chroma DB
 
 results/
 |-- RESULTS.md                     # Narrative summary of current model findings
@@ -415,8 +457,9 @@ or data use agreement is required to run or demo it. See
 | Layer | Tools |
 | --- | --- |
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
+| Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented API | FastAPI, Uvicorn, Pydantic |
-| Planned agents/retrieval | LangGraph, LlamaIndex or LangChain, ChromaDB, Groq/OpenAI-compatible LLMs |
+| Planned agents | LangGraph, LlamaIndex or LangChain, Groq/OpenAI-compatible LLMs |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned frontend | React or Streamlit for MVP |
 | Planned notifications | Twilio or patient portal stub |
