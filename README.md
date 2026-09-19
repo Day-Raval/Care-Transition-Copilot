@@ -48,9 +48,9 @@ loop.
 The diagram below shows the intended end-to-end architecture. The current
 codebase has implemented the local synthetic-data, ingestion, feature,
 target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
-section-aware note chunking, vector-store indexing, and risk-model API pieces
-first. Agent orchestration, persistence services, and the clinician UI are still
-planned work.
+section-aware note chunking, vector-store indexing, risk-model API, retrieval
+agent, reasoning agent, critique agent, and LangGraph orchestration pieces
+first. Persistence services and the clinician UI are still planned work.
 
 ```mermaid
 flowchart TB
@@ -138,8 +138,10 @@ flowchart TB
 - **Implemented retrieval foundation** - discharge notes are split into
   section-aware chunks, embedded into a local persistent ChromaDB collection, and
   validated with open-corpus and patient-scoped retrieval checks.
-- **Planned agents** - LangGraph will coordinate retrieval, care-plan drafting,
-  critique, explanation, and clinician handoff.
+- **Implemented agent pipeline** - LangGraph coordinates patient-scoped
+  retrieval, Groq-hosted care-plan drafting, and a second-model critique step.
+  The pipeline keeps missing documentation explicit instead of smoothing over
+  gaps.
 - **Planned review and action** - a clinician-facing app will keep AI output in
   draft state until approval, then write the plan back through FHIR and send
   follow-up notifications.
@@ -204,6 +206,20 @@ The current repository shows the first stage of the MVP working locally:
 - Added retrieval diagnostics for CHF mention coverage and patient-scoped
   retrieval behavior in `scripts/check_chf_notes.py`,
   `scripts/check_patient_chf_history.py`, and `scripts/test_scoped_retrieval.py`.
+- Added patient-scoped retrieval in `src.retrieval.query_store`, including a
+  relevance-distance threshold so unrelated chunks are not forced into the
+  context when a patient's notes have no genuine match.
+- Added `src.agents.retrieval_agent`, which runs fixed clinical-category
+  searches for admission reason, comorbidities, medications, procedures/plan,
+  and follow-up, then returns a structured context summary.
+- Added `src.agents.reasoning_agent`, which uses Groq
+  `openai/gpt-oss-120b` by default to draft a grounded three-section care plan:
+  risk factors, recommended follow-up actions, and documentation gaps.
+- Added `src.agents.critique_agent`, which uses Groq `openai/gpt-oss-20b` by
+  default to review the draft for hallucination, clinical overreach, and missed
+  documentation gaps before clinician review.
+- Added `src.agents.orchestrator`, a LangGraph state machine that wires
+  retrieval -> reasoning -> critique into one runnable pipeline.
 
 Committed processed data currently includes:
 
@@ -240,6 +256,16 @@ Latest retrieval/vector-store summary:
 | Embeddings | Uses ChromaDB's default local embedding function; first run may download the model cache |
 | Validation | Runs broad clinical queries and patient-scoped retrieval checks with metadata inspection |
 
+Latest agent-orchestration summary:
+
+| Agent | Current behavior |
+| --- | --- |
+| Retrieval | Patient-scoped ChromaDB search across five fixed clinical categories with relevance thresholding |
+| Reasoning | Groq-hosted LLM drafts a care-coordination plan from retrieved context only |
+| Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps |
+| Orchestrator | LangGraph runs retrieval -> reasoning -> critique as one pipeline |
+| Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
+
 ## Clinician UI
 
 ![Clinician review concept](Docs/readme_clinician_review.svg)
@@ -252,13 +278,15 @@ Design principles from the proposal:
 
 ## Status
 
-MVP in progress. The local data, modeling, retrieval foundation, and first
-serving layer are now implemented: FHIR ingestion, hospitalization episode
-construction, feature export, 30-day target labeling, baseline Cox survival
-modeling, patient-grouped cross-validation for comparing Cox, Random Survival
-Forest, and Gradient Boosting survival candidates, experiment logging/model
-saving, fairness-audit infrastructure, section-aware note chunking, ChromaDB
-vector-store indexing, and a FastAPI wrapper for the configured model run.
+MVP in progress. The local data, modeling, retrieval foundation, agent pipeline,
+and first serving layer are now implemented: FHIR ingestion, hospitalization
+episode construction, feature export, 30-day target labeling, baseline Cox
+survival modeling, patient-grouped cross-validation for comparing Cox, Random
+Survival Forest, and Gradient Boosting survival candidates, experiment
+logging/model saving, fairness-audit infrastructure, section-aware note
+chunking, ChromaDB vector-store indexing, FastAPI model serving, patient-scoped
+retrieval, grounded care-plan drafting, second-model critique, and LangGraph
+orchestration.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -268,8 +296,9 @@ inconclusive at this dataset size because most protected subgroups do not have
 enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
-audit, adding a retrieval-agent interface with source citations, agent
-orchestration, persistence/audit services, and a clinician-facing demo workflow.
+audit, investigating duplicate/near-duplicate retrieval chunks, strengthening
+reasoning/critique model independence, adding persistence/audit services, and
+building the clinician-facing review workflow.
 
 ## Getting started
 
@@ -281,6 +310,8 @@ orchestration, persistence/audit services, and a clinician-facing demo workflow.
 - Docker + Docker Compose for the planned Postgres and Redis services
 - Network access on the first vector-store build so ChromaDB can cache its
   default local embedding model
+- `GROQ_API_KEY` in `.env` for the reasoning and critique agents. Optional
+  overrides: `GROQ_MODEL`, `CRITIQUE_MODEL_NAME`, and `CRITIQUE_MODEL_API_KEY`.
 
 ### Setup
 
@@ -326,7 +357,13 @@ python -m src.embeddings.build_vector_store
 python -m src.embeddings.validate_vector_store
 python scripts/test_scoped_retrieval.py
 
-# 13. Serve the configured model run from config.yaml
+# 13. Run the retrieval/reasoning/critique agent pipeline
+python -m src.agents.retrieval_agent <patient_id>
+python -m src.agents.reasoning_agent <patient_id>
+python -m src.agents.critique_agent <patient_id>
+python -m src.agents.orchestrator <patient_id>
+
+# 14. Serve the configured model run from config.yaml
 uvicorn src.api.main:app --reload
 ```
 
@@ -401,7 +438,14 @@ python -m src.embeddings.build_vector_store
 python -m src.embeddings.validate_vector_store
 python scripts/check_chf_notes.py
 python scripts/check_patient_chf_history.py <patient_id>
+python scripts/check_retrieval_match.py <patient_id> "heart failure medications" "heart failure"
+python scripts/rank_all_chunks_for_patient.py <patient_id> "heart failure medications" "heart failure"
+python scripts/check_duplicate_chunks.py
+python scripts/check_patient_duplicate_notes.py <patient_id>
 python scripts/test_scoped_retrieval.py
+python -m src.retrieval.query_store <patient_id> "follow-up care instructions"
+python -m src.agents.retrieval_agent <patient_id>
+python -m src.agents.orchestrator <patient_id>
 ```
 
 ### Running tests
@@ -413,8 +457,10 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 
 ```text
 src/
+|-- agents/       # Retrieval, reasoning, critique, and LangGraph orchestration
 |-- api/          # FastAPI model serving, dynamic request schema, drift report
 |-- embeddings/   # Section-aware note chunking and Chroma vector-store build
+|-- retrieval/    # Patient-scoped Chroma queries with relevance thresholding
 |-- ingestion/    # FHIR parsing, temporal filters, episode clustering
 |-- features/     # 30-day target construction
 |-- model/        # Cox baseline, experiment registry, fairness/model comparison
@@ -429,6 +475,10 @@ scripts/
 |-- compare_comorbidity_inclusion.py # CV check for comorbidity_count
 |-- check_chf_notes.py             # Exact-text CHF mention coverage check
 |-- check_patient_chf_history.py   # Patient-specific condition mention check
+|-- check_retrieval_match.py       # Inspect retrieved chunk text for a term
+|-- rank_all_chunks_for_patient.py # Rank all patient chunks against one query
+|-- check_duplicate_chunks.py      # Check duplicate encounter IDs in notes
+|-- check_patient_duplicate_notes.py # Check duplicate note text per patient
 `-- test_scoped_retrieval.py       # Patient-scoped vector retrieval smoke test
 
 data/
@@ -458,8 +508,8 @@ or data use agreement is required to run or demo it. See
 | --- | --- |
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
+| Implemented agents | LangGraph, Groq, fixed patient-scoped retrieval categories |
 | Implemented API | FastAPI, Uvicorn, Pydantic |
-| Planned agents | LangGraph, LlamaIndex or LangChain, Groq/OpenAI-compatible LLMs |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned frontend | React or Streamlit for MVP |
 | Planned notifications | Twilio or patient portal stub |
