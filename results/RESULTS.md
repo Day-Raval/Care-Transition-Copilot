@@ -161,11 +161,127 @@ is the one remaining validation step before the retrieval agent build.
 
 --- 
 
+## Agent Orchestration — Retrieval, Reasoning, Critique (LangGraph)
+
+**Status: Working end to end, validated across multiple patients.**
+
+Built the three-agent pipeline from the original architecture's Agent
+layer: Retrieval Agent -> Reasoning Agent -> Plan Critique Agent,
+orchestrated with LangGraph. Confirmed working both individually and
+chained together automatically via the orchestrator.
+
+### Retrieval Agent (`src/agents/retrieval_agent.py`)
+Patient-scoped semantic search over discharge notes (`src/retrieval/query_store.py`,
+built on ChromaDB), organized into 5 fixed clinical categories (admission
+reason, comorbidities, medications, procedures/plan, follow-up) rather
+than one free-text query. No LLM dependency — deliberately kept
+testable and free of an external API for this step.
+
+Validated against real patients with the real embedding model:
+correctly surfaces relevant chart content (e.g. a genuine cardiac
+workup — echocardiography, troponin, heart failure tracking panel —
+for a patient with confirmed CHF history), and correctly returns
+`(no relevant documentation found)` for categories with genuinely
+nothing on file, rather than forcing a weak match. Relevance threshold
+(1.3) calibrated against one confirmed real true positive.
+
+**Known limitation, not investigated further:** some patients show
+duplicate/near-duplicate chunks in retrieval results (e.g. the same
+chief complaint appearing twice). Confirmed cosmetic — does not appear
+to affect downstream draft quality in testing — but the root cause
+(duplicate encounters vs. an indexing artifact) was not conclusively
+determined.
+
+### Reasoning Agent (`src/agents/reasoning_agent.py`)
+Drafts a 3-section follow-up care plan (risk factors, recommended
+actions, documentation gaps) from the retrieved context, using Groq
+(`openai/gpt-oss-120b`). Prompt explicitly forbids inventing
+medications/diagnoses/procedures not in the retrieved context, and
+requires documentation gaps to be surfaced, not glossed over.
+
+Confirmed via testing: correctly grounds claims in retrieved content
+(e.g. "no active medications" reflected accurately); correctly hedges
+on ambiguous source data rather than fabricating precision (a patient's
+notes showed two different ages, 59 and 67, across encounters — the
+draft used ">60 years" rather than picking one arbitrarily); correctly
+lists genuine documentation gaps when they exist.
+
+### Plan Critique Agent (`src/agents/critique_agent.py`)
+Independent second-model review before a clinician would see the draft,
+using a different model (`openai/gpt-oss-20b`) on the same Groq account.
+Checks for hallucination, clinical overreach (specific dosing/diagnosis
+decisions), and glossed-over documentation gaps.
+
+**Real reliability issue found and fixed during validation:** initial
+testing (4 runs across 2 patients) showed the critique agent was
+inconsistent — the same type of routine recommendation (e.g. "schedule
+a PCP visit," "refer to neurology if symptoms persist") was flagged as
+"hallucination" in one run and correctly passed in another, on
+functionally identical draft content. Root cause: the prompt didn't
+distinguish "asserting an undocumented fact as true" from "recommending
+a future action grounded in a real documented symptom." Fixed by adding
+explicit positive/negative examples of each to the prompt. Confirmed
+fixed via repeat testing: the same two patients now get consistent,
+correct verdicts across multiple runs — PASS on legitimate
+recommendations, still correctly flags genuine overreach (a prior run
+caught the draft introducing "neuropathic symptoms" as a specific
+clinical term not present in the source, which only said "tingling in
+hands and feet").
+
+**Note on model independence:** both reasoning and critique currently
+run on OpenAI's open-weight models (120B and 20B) — different sizes,
+not different companies. This is a real, known limitation on how
+independent the "second opinion" actually is; worth revisiting if a
+genuinely different-company model becomes available and confirmed
+working on the project's Groq account.
+
+### Orchestrator (`src/agents/orchestrator.py`)
+LangGraph state machine wiring all three agents: retrieval -> reasoning
+-> critique. State-passing and node execution order verified via
+streaming. Each node fails loudly with a clear setup message if its
+required API key is missing, rather than silently producing placeholder
+output.
+
+Confirmed working end to end on 2 patients with materially different
+chart profiles (a thin-documentation case with 2 explicit "no relevant
+documentation found" categories, and a data-rich oncology case) — both
+produced grounded drafts with correctly surfaced gaps and correct,
+non-arbitrary critique verdicts.
+
+### Bugs found and fixed along the way
+- `retrieve_relevant_context()` was missing `encounter_id` in its return
+  dict, crashing `retrieval_agent.py` on every call
+- Critique agent was initially built against the wrong provider
+  (Anthropic) based on outdated project planning docs — corrected to
+  Groq once the current `.env.example` clarified both models should be
+  Groq-hosted
+- Default model names (`llama-3.3-70b-versatile` for reasoning) had been
+  deprecated/restricted on the current Groq account — replaced with
+  confirmed-working models (`openai/gpt-oss-120b` / `openai/gpt-oss-20b`)
+- Critique prompt inconsistency — fixed with explicit examples in system prompts
+
 ## Next steps
 
-1. Wrap the chosen model (`cox_baseline_v1.joblib` equivalent, logged in
-   the experiment registry) in a FastAPI service — the Model Serving API
-   layer from the system architecture
-2. Revisit the fairness audit once population size increases
-3. Begin the agent orchestration layer (retrieval agent, reasoning,
-   critique agent) once the API exists for them to call
+1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.** Model
+   Serving API built (`src/api/main.py`), adaptive request schema,
+   drift monitoring, fairness disclaimer on every prediction. See
+   "Model Serving API" section above.
+2. ~~Begin the agent orchestration layer~~ — **Done.** Retrieval,
+   reasoning, and critique agents built and validated, orchestrated via
+   LangGraph. See "Agent Orchestration" section above.
+3. Revisit the fairness audit once population size increases —
+   **still open.** Only the majority group per protected attribute
+   (female for sex, White for race) has enough test-set events to audit
+   reliably at current dataset size (~3,110 episodes, ~52 positive
+   events). Estimated 8,000-10,000+ patients needed for a determinate
+   race-based comparison.
+4. Investigate the duplicate-chunk pattern in retrieval results (flagged
+   as a known cosmetic limitation, not chased down) — determine whether
+   it's genuine duplicate encounters or an indexing artifact.
+5. Address the reasoning/critique model independence gap — both
+   currently run on OpenAI's open-weight models (120B/20B), same
+   company, different sizes. Revisit if a genuinely different-company
+   model becomes confirmed-working on the project's Groq account.
+6. Wire up the Clinician Web App layer (React UI — risk queue dashboard,
+   patient detail/plan review) per the original architecture, once the
+   above are addressed or explicitly deprioritized.

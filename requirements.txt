@@ -13,3 +13,4 @@ python-dotenv
 hl7apy
 fhir.resources
 scikit-survival
+groq

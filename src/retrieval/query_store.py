@@ -37,13 +37,6 @@ def retrieve_relevant_context(
     n_results: int = 3,
     distance_threshold: float = RELEVANCE_DISTANCE_THRESHOLD,
 ) -> list[dict] | None:
-    """
-    Returns a list of {"text": ..., "section": ..., "distance": ...} for
-    chunks that both (a) belong to this patient and (b) clear the
-    relevance threshold — or None if nothing did, meaning "no relevant
-    chart history found," a valid and important outcome to distinguish
-    from "here's the closest thing we had, regardless of quality."
-    """
     results = collection.query(
         query_texts=[query],
         n_results=n_results,
@@ -51,10 +44,15 @@ def retrieve_relevant_context(
     )
 
     if not results["documents"][0]:
-        return None  # patient has no notes at all in the store
+        return None
 
     relevant = [
-        {"text": doc, "section": meta["section_name"], "distance": dist}
+        {
+            "text": doc,
+            "section": meta["section_name"],
+            "distance": dist,
+            "encounter_id": meta["encounter_id"],
+        }
         for doc, meta, dist in zip(
             results["documents"][0], results["metadatas"][0], results["distances"][0]
         )
