@@ -248,40 +248,95 @@ documentation found" categories, and a data-rich oncology case) — both
 produced grounded drafts with correctly surfaced gaps and correct,
 non-arbitrary critique verdicts.
 
-### Bugs found and fixed along the way
-- `retrieve_relevant_context()` was missing `encounter_id` in its return
-  dict, crashing `retrieval_agent.py` on every call
-- Critique agent was initially built against the wrong provider
-  (Anthropic) based on outdated project planning docs — corrected to
-  Groq once the current `.env.example` clarified both models should be
-  Groq-hosted
-- Default model names (`llama-3.3-70b-versatile` for reasoning) had been
-  deprecated/restricted on the current Groq account — replaced with
-  confirmed-working models (`openai/gpt-oss-120b` / `openai/gpt-oss-20b`)
-- Critique prompt inconsistency — fixed with explicit examples in system prompts
+## Agent Workflow — Risk Model Integration & Dynamic Retrieval
+
+**Status: Working end to end, validated across multiple patients with
+materially different clinical profiles (cardiac vs. oncology).**
+
+Closed a real gap that existed until this point: the Model Serving API
+(risk model) and the agent pipeline (retrieval/reasoning/critique) had
+been built as two separate systems that never called each other.
+
+### Risk Model Tool (`src/agents/risk_tool.py`)
+Connects the agent pipeline to the live Model Serving API over HTTP.
+Looks up a patient's 6 model features from the processed dataset, calls
+`/predict`, and returns the risk assessment plus the patient's actual
+admission reason (used downstream for dynamic retrieval). Fails loudly
+with the exact fix (`uvicorn src.api.main:app --port 8080`) if the API
+isn't running, rather than silently treating every patient as low-risk.
+
+### Conditional Routing (`src/agents/orchestrator.py`)
+The orchestrator now makes a genuine decision based on the real risk
+score: LOW-risk patients get a fast, templated summary and skip
+retrieval/reasoning/critique entirely; MEDIUM/HIGH-risk patients get the
+full pipeline. Confirmed via mocked testing that both branches execute
+the correct, and only the correct, sequence of nodes.
+
+### Dynamic Category Generation (`src/agents/retrieval_agent.py`)
+Replaced the fixed 5 generic retrieval categories with LLM-generated
+ones, tailored per-patient to their actual admission reason and risk
+level (via `generate_dynamic_categories()`). Falls back automatically to
+the fixed 5 on any failure (missing API key, malformed LLM output) —
+confirmed via testing that both failure modes correctly fall back rather
+than leaving retrieval empty.
+
+Confirmed working on two clinically distinct patients: a cardiac patient
+generated categories like "prosthetic valve function" and "cardiac
+biomarkers... troponin, BNP"; an oncology patient generated "histopathology
+and molecular profiling," "EGFR, ALK, ROS1, KRAS, PD-L1 results" — genuinely
+different, clinically appropriate query sets, not generic labels reworded.
+
+### Bug found and fixed during validation
+Critique agent was receiving the reasoning agent's draft plan but NOT
+the risk-assessment context that draft was built from. Result: the
+critique agent flagged the risk percentile itself as an unsupported
+claim ("the chart does not provide a percentile ranking") on every
+medium/high-risk patient — a systematic false positive that would have
+affected every future run, not a one-off. Fixed by passing the same
+risk-context line to both reasoning and critique via a shared
+`_risk_context_line()` helper, plus an explicit prompt instruction
+telling the critique model this line is pre-validated, not part of the
+chart to scrutinize. Confirmed fixed via direct before/after comparison
+on the same patient, same risk score — FLAGGED became PASS with no other
+changes.
+
+### Known limitation, not investigated further
+Some patients' retrieved chunks show heavy internal repetition (e.g. the
+same medication line appearing a dozen+ times within one chunk) when a
+patient's real documentation is genuinely limited to one repetitive
+source (e.g. a chemo regimen logged across many similar encounters).
+Confirmed cosmetic — the reasoning agent correctly summarized the
+repeated content once rather than restating it — but the underlying
+duplicate-chunk question (flagged earlier, also not chased down) likely
+explains this pattern and remains open.
 
 ## Next steps
 
-1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.** Model
-   Serving API built (`src/api/main.py`), adaptive request schema,
-   drift monitoring, fairness disclaimer on every prediction. See
-   "Model Serving API" section above.
-2. ~~Begin the agent orchestration layer~~ — **Done.** Retrieval,
-   reasoning, and critique agents built and validated, orchestrated via
-   LangGraph. See "Agent Orchestration" section above.
-3. Revisit the fairness audit once population size increases —
-   **still open.** Only the majority group per protected attribute
-   (female for sex, White for race) has enough test-set events to audit
-   reliably at current dataset size (~3,110 episodes, ~52 positive
-   events). Estimated 8,000-10,000+ patients needed for a determinate
-   race-based comparison.
-4. Investigate the duplicate-chunk pattern in retrieval results (flagged
-   as a known cosmetic limitation, not chased down) — determine whether
-   it's genuine duplicate encounters or an indexing artifact.
-5. Address the reasoning/critique model independence gap — both
+1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
+2. ~~Begin the agent orchestration layer~~ — **Done.**
+3. ~~Connect the risk model to the agent pipeline~~ — **Done.** Risk
+   assessment now drives conditional routing and informs both retrieval
+   and reasoning/critique context. See "Agent Workflow — Risk Model
+   Integration" section above.
+4. Revisit the fairness audit once population size increases — **still
+   open.** ~8,000-10,000+ patients needed for a determinate race-based
+   comparison at current event rates.
+5. Investigate the duplicate/repeated-chunk pattern in retrieval results
+   — now observed in two forms (near-duplicate chunks across encounters,
+   and heavy internal repetition within a single chunk). Determine root
+   cause (genuine duplicate documentation vs. an indexing artifact)
+   before it's relied on for anything beyond a portfolio demo.
+6. Address the reasoning/critique model independence gap — both
    currently run on OpenAI's open-weight models (120B/20B), same
    company, different sizes. Revisit if a genuinely different-company
    model becomes confirmed-working on the project's Groq account.
-6. Wire up the Clinician Web App layer (React UI — risk queue dashboard,
-   patient detail/plan review) per the original architecture, once the
-   above are addressed or explicitly deprioritized.
+7. Consider whether the risk model itself should become an LLM-callable
+   tool (function-calling) rather than a fixed pipeline step — the
+   current design has the orchestrator always call it first; a more
+   agentic version could let an LLM decide independently when
+   reassessment is warranted (e.g. mid-conversation, on new information).
+   Deliberately not done yet: the current deterministic "always assess,
+   then route" design is easier to audit and test than a fully
+   LLM-decided call pattern would be.
+8. Wire up the Clinician Web App layer (React UI — risk queue dashboard,
+   patient detail/plan review) per the original architecture.

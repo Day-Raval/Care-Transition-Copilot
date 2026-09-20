@@ -3,13 +3,22 @@ Critique Agent — a SECOND model reviews the draft plan before it reaches
 a clinician. Runs on the SAME Groq API as the reasoning agent, but a
 DIFFERENT model — see reasoning_agent.py's docstring for the honest
 caveat that both current defaults are OpenAI open-weight models, just
-different sizes, not genuinely different companies. Swap in a real
-cross-company model on either side if one becomes available and
-confirmed working on this account.
+different sizes, not genuinely different companies.
 
-CRITIQUE_MODEL_NAME: openai/gpt-oss-20b — confirmed; 
-Check https://console.groq.com/docs/models for the current list
+CRITIQUE_MODEL_NAME: openai/gpt-oss-20b — confirmed available
+and working on this project's Groq account (verified via direct API
+call). Check https://console.groq.com/docs/models for the current list
 before changing it, since Groq's catalog changes over time.
+
+risk_context parameter: the orchestrator now feeds a risk-assessment
+line (e.g. "[Risk assessment: HIGH risk, 84th percentile]") into BOTH
+the reasoning agent's input AND this agent's input. Without it here,
+the critique agent has no way to know the risk percentile came from a
+real, already-validated model rather than being invented by the
+reasoning agent — confirmed via testing that this caused a real false
+positive ("the chart does not provide a percentile ranking") on every
+high/medium-risk patient. The system prompt explicitly tells the model
+not to scrutinize this block as if it were part of the chart.
 """
 
 import os
@@ -20,14 +29,16 @@ CRITIQUE_MODEL = os.getenv("CRITIQUE_MODEL_NAME", "openai/gpt-oss-20b")
 
 CRITIQUE_SYSTEM_PROMPT = """You are reviewing a draft care coordination plan before it reaches a clinician. You will be given the ORIGINAL retrieved chart context and the DRAFT PLAN generated from it by a different model.
 
+Note: a bracketed [Risk assessment: ...] line may appear before the chart context. This comes from a separate, already-validated statistical risk model (not the chart, not the reasoning model's invention) — treat any risk category or percentile the draft mentions as legitimate if it matches this line. Do not flag it as undocumented or unsupported.
+
 CRITICAL DISTINCTION — read carefully before flagging anything:
-- HALLUCINATION means the draft asserts something as an ALREADY-DOCUMENTED FACT that does not appear in the original context (e.g. "patient has diabetes" when diabetes is never mentioned).
+- HALLUCINATION means the draft asserts something as an ALREADY-DOCUMENTED FACT that does not appear in the original context or the risk assessment line (e.g. "patient has diabetes" when diabetes is never mentioned).
 - It is NOT hallucination for the draft to RECOMMEND A FUTURE ACTION based on something that IS documented (e.g. recommending "schedule a PCP visit" is a normal, expected care-coordination recommendation, not a hallucination, even though "schedule a PCP visit" itself doesn't appear in the chart — recommending next steps is the reasoning agent's entire job).
 - Example of what NOT to flag: chart says "tingling in hands and feet" -> draft recommends "refer to neurology to evaluate the tingling." This is a reasonable recommendation grounded in a real documented symptom. Do not flag this.
 - Example of what TO flag: chart says "tingling in hands and feet" -> draft states "patient has peripheral neuropathy" (asserting an undocumented diagnosis as fact) or recommends "start gabapentin 300mg" (a specific dosing decision beyond care-coordination scope).
 
 Check specifically for:
-1. HALLUCINATION (per the definition above — an undocumented fact asserted as true, NOT a reasonable recommendation)
+1. HALLUCINATION (per the definition above — an undocumented fact asserted as true, NOT a reasonable recommendation, and NOT the risk assessment line)
 2. OVERREACH — a SPECIFIC clinical decision (e.g. a drug name + dosage, a diagnosis asserted as confirmed) beyond general care-coordination actions like "schedule a visit," "refer to specialist," "reconcile medications"
 3. GLOSSED-OVER GAPS — did the original context have a category marked "(no relevant documentation found)" that the draft failed to mention as a gap?
 
@@ -37,7 +48,7 @@ ISSUES: (list each specific issue found, quoting the problematic text — or "No
 SUMMARY: (one plain-language sentence for the clinician)"""
 
 
-def critique_plan(patient_context_summary: str, draft_plan: str) -> str:
+def critique_plan(patient_context_summary: str, draft_plan: str, risk_context: str = "") -> str:
     """
     Raises RuntimeError with clear setup instructions if the critique
     model's API key is missing — same fail-loud pattern as the reasoning
@@ -59,7 +70,7 @@ def critique_plan(patient_context_summary: str, draft_plan: str) -> str:
             {"role": "system", "content": CRITIQUE_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"ORIGINAL CONTEXT:\n{patient_context_summary}\n\nDRAFT PLAN:\n{draft_plan}",
+                "content": f"{risk_context}ORIGINAL CONTEXT:\n{patient_context_summary}\n\nDRAFT PLAN:\n{draft_plan}",
             },
         ],
         temperature=0.1,  # even lower than reasoning — this is a checking task, not drafting
@@ -71,7 +82,7 @@ if __name__ == "__main__":
     import sys
 
     from dotenv import load_dotenv
-    load_dotenv()  # standalone runs need this explicitly
+    load_dotenv()
 
     sys.path.insert(0, ".")
     from src.agents.reasoning_agent import draft_care_plan
