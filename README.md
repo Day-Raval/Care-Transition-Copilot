@@ -48,9 +48,10 @@ loop.
 The diagram below shows the intended end-to-end architecture. The current
 codebase has implemented the local synthetic-data, ingestion, feature,
 target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
-section-aware note chunking, vector-store indexing, risk-model API, retrieval
-agent, reasoning agent, critique agent, and LangGraph orchestration pieces
-first. Persistence services and the clinician UI are still planned work.
+section-aware note chunking, vector-store indexing, risk-model API,
+risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
+critique agent, and risk-gated LangGraph orchestration pieces first.
+Persistence services and the clinician UI are still planned work.
 
 ```mermaid
 flowchart TB
@@ -138,10 +139,11 @@ flowchart TB
 - **Implemented retrieval foundation** - discharge notes are split into
   section-aware chunks, embedded into a local persistent ChromaDB collection, and
   validated with open-corpus and patient-scoped retrieval checks.
-- **Implemented agent pipeline** - LangGraph coordinates patient-scoped
-  retrieval, Groq-hosted care-plan drafting, and a second-model critique step.
-  The pipeline keeps missing documentation explicit instead of smoothing over
-  gaps.
+- **Implemented agent pipeline** - LangGraph now starts with a live risk-model
+  assessment, skips full chart review for low-risk patients, and runs dynamic
+  patient-scoped retrieval, Groq-hosted care-plan drafting, and a second-model
+  critique step for medium/high-risk patients. The pipeline keeps missing
+  documentation explicit instead of smoothing over gaps.
 - **Planned review and action** - a clinician-facing app will keep AI output in
   draft state until approval, then write the plan back through FHIR and send
   follow-up notifications.
@@ -212,14 +214,25 @@ The current repository shows the first stage of the MVP working locally:
 - Added `src.agents.retrieval_agent`, which runs fixed clinical-category
   searches for admission reason, comorbidities, medications, procedures/plan,
   and follow-up, then returns a structured context summary.
+- Added dynamic retrieval-category generation in `src.agents.retrieval_agent`.
+  The orchestrator can now tailor search queries to the patient's admission
+  reason and risk category, while standalone retrieval still falls back to the
+  fixed categories if an API key is missing or generation fails.
 - Added `src.agents.reasoning_agent`, which uses Groq
   `openai/gpt-oss-120b` by default to draft a grounded three-section care plan:
   risk factors, recommended follow-up actions, and documentation gaps.
 - Added `src.agents.critique_agent`, which uses Groq `openai/gpt-oss-20b` by
   default to review the draft for hallucination, clinical overreach, and missed
-  documentation gaps before clinician review.
-- Added `src.agents.orchestrator`, a LangGraph state machine that wires
-  retrieval -> reasoning -> critique into one runnable pipeline.
+  documentation gaps before clinician review. The critique input now receives
+  the same risk-assessment context as the reasoning agent so valid model risk
+  percentiles are not flagged as unsupported chart claims.
+- Added `src.agents.risk_tool`, which looks up the patient's latest model
+  features from `data/processed/discharge_records_with_target.csv`, calls the
+  live FastAPI `/predict` endpoint, and returns risk score, percentile, category,
+  and admission reason to the agent graph.
+- Updated `src.agents.orchestrator` into a risk-gated LangGraph state machine:
+  risk assessment -> low-risk summary, or risk assessment -> dynamic retrieval
+  -> reasoning -> critique for medium/high-risk patients.
 
 Committed processed data currently includes:
 
@@ -260,10 +273,11 @@ Latest agent-orchestration summary:
 
 | Agent | Current behavior |
 | --- | --- |
-| Retrieval | Patient-scoped ChromaDB search across five fixed clinical categories with relevance thresholding |
-| Reasoning | Groq-hosted LLM drafts a care-coordination plan from retrieved context only |
-| Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps |
-| Orchestrator | LangGraph runs retrieval -> reasoning -> critique as one pipeline |
+| Risk tool | Calls the live FastAPI `/predict` endpoint and passes risk category, percentile, score, and admission reason into the agent graph |
+| Retrieval | Patient-scoped ChromaDB search with relevance thresholding; fixed categories for standalone use and dynamic categories when orchestrated with risk/admission context |
+| Reasoning | Groq-hosted LLM drafts a care-coordination plan from retrieved context plus the validated risk-assessment line |
+| Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
+| Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -285,7 +299,8 @@ survival modeling, patient-grouped cross-validation for comparing Cox, Random
 Survival Forest, and Gradient Boosting survival candidates, experiment
 logging/model saving, fairness-audit infrastructure, section-aware note
 chunking, ChromaDB vector-store indexing, FastAPI model serving, patient-scoped
-retrieval, grounded care-plan drafting, second-model critique, and LangGraph
+retrieval, risk-model-to-agent integration, dynamic retrieval categories,
+grounded care-plan drafting, second-model critique, and risk-gated LangGraph
 orchestration.
 
 The current modeling work is still diagnostic rather than production-ready. The
@@ -357,27 +372,35 @@ python -m src.embeddings.build_vector_store
 python -m src.embeddings.validate_vector_store
 python scripts/test_scoped_retrieval.py
 
-# 13. Run the retrieval/reasoning/critique agent pipeline
+# 13. Serve the configured model run from config.yaml
+uvicorn src.api.main:app --reload --port 8080
+```
+
+In another terminal:
+
+```bash
+# 14. Run the retrieval/reasoning/critique agent pipeline
 python -m src.agents.retrieval_agent <patient_id>
+python -m src.agents.retrieval_agent <patient_id> --dynamic
 python -m src.agents.reasoning_agent <patient_id>
 python -m src.agents.critique_agent <patient_id>
+python -m src.agents.risk_tool <patient_id>
 python -m src.agents.orchestrator <patient_id>
-
-# 14. Serve the configured model run from config.yaml
-uvicorn src.api.main:app --reload
 ```
 
 ### API smoke tests
 
-After starting the API with `uvicorn src.api.main:app --reload`, open the
-interactive docs at `http://127.0.0.1:8000/docs` or run these commands.
+After starting the API with `uvicorn src.api.main:app --reload --port 8080`,
+open the interactive docs at `http://127.0.0.1:8080/docs` or run these
+commands. The agent risk tool uses `http://localhost:8080` by default; set
+`RISK_API_BASE_URL` if you serve the API on another port.
 
 PowerShell:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8080/health
 
-Invoke-RestMethod http://127.0.0.1:8000/model-info
+Invoke-RestMethod http://127.0.0.1:8080/model-info
 
 $body = @{
   age_at_discharge = 72
@@ -389,22 +412,22 @@ $body = @{
 } | ConvertTo-Json
 
 Invoke-RestMethod `
-  -Uri http://127.0.0.1:8000/predict `
+  -Uri http://127.0.0.1:8080/predict `
   -Method Post `
   -ContentType "application/json" `
   -Body $body
 
-Invoke-RestMethod http://127.0.0.1:8000/drift-report
+Invoke-RestMethod http://127.0.0.1:8080/drift-report
 ```
 
 Bash/curl:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8080/health
 
-curl http://127.0.0.1:8000/model-info
+curl http://127.0.0.1:8080/model-info
 
-curl -X POST http://127.0.0.1:8000/predict \
+curl -X POST http://127.0.0.1:8080/predict \
   -H "Content-Type: application/json" \
   -d '{
     "age_at_discharge": 72,
@@ -415,7 +438,7 @@ curl -X POST http://127.0.0.1:8000/predict \
     "med_flag_anticoagulant": false
   }'
 
-curl http://127.0.0.1:8000/drift-report
+curl http://127.0.0.1:8080/drift-report
 ```
 
 `/predict` returns a relative Cox risk score, percentile, and low/medium/high
@@ -445,6 +468,8 @@ python scripts/check_patient_duplicate_notes.py <patient_id>
 python scripts/test_scoped_retrieval.py
 python -m src.retrieval.query_store <patient_id> "follow-up care instructions"
 python -m src.agents.retrieval_agent <patient_id>
+python -m src.agents.retrieval_agent <patient_id> --dynamic
+python -m src.agents.risk_tool <patient_id>
 python -m src.agents.orchestrator <patient_id>
 ```
 
@@ -457,7 +482,7 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 
 ```text
 src/
-|-- agents/       # Retrieval, reasoning, critique, and LangGraph orchestration
+|-- agents/       # Risk tool, retrieval, reasoning, critique, and LangGraph orchestration
 |-- api/          # FastAPI model serving, dynamic request schema, drift report
 |-- embeddings/   # Section-aware note chunking and Chroma vector-store build
 |-- retrieval/    # Patient-scoped Chroma queries with relevance thresholding
@@ -508,7 +533,7 @@ or data use agreement is required to run or demo it. See
 | --- | --- |
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
-| Implemented agents | LangGraph, Groq, fixed patient-scoped retrieval categories |
+| Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories |
 | Implemented API | FastAPI, Uvicorn, Pydantic |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned frontend | React or Streamlit for MVP |
