@@ -50,8 +50,9 @@ codebase has implemented the local synthetic-data, ingestion, feature,
 target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
 section-aware note chunking, vector-store indexing, risk-model API,
 risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
-critique agent, and risk-gated LangGraph orchestration pieces first.
-Persistence services and the clinician UI are still planned work.
+critique agent, risk-gated LangGraph orchestration, and free-form
+tool-calling chat agent pieces first. Persistence services and the clinician UI
+are still planned work.
 
 ```mermaid
 flowchart TB
@@ -211,6 +212,9 @@ The current repository shows the first stage of the MVP working locally:
 - Added patient-scoped retrieval in `src.retrieval.query_store`, including a
   relevance-distance threshold so unrelated chunks are not forced into the
   context when a patient's notes have no genuine match.
+- Updated patient-scoped retrieval to over-fetch candidates and suppress
+  highly similar note chunks, even when near-duplicate text comes from different
+  encounters.
 - Added `src.agents.retrieval_agent`, which runs fixed clinical-category
   searches for admission reason, comorbidities, medications, procedures/plan,
   and follow-up, then returns a structured context summary.
@@ -233,6 +237,12 @@ The current repository shows the first stage of the MVP working locally:
 - Updated `src.agents.orchestrator` into a risk-gated LangGraph state machine:
   risk assessment -> low-risk summary, or risk assessment -> dynamic retrieval
   -> reasoning -> critique for medium/high-risk patients.
+- Added `src.agents.chat_agent` and `src.agents.tools`, a free-form clinician
+  question interface where the LLM decides whether to call the risk assessment
+  tool, patient chart search, both, or neither. Tool calls are returned with the
+  answer as an audit trail, and chart-search tool guidance now steers the model
+  toward validated clinical query phrasings instead of vague searches such as
+  "discharge summary."
 
 Committed processed data currently includes:
 
@@ -267,6 +277,7 @@ Latest retrieval/vector-store summary:
 | Short sections | Merges tiny boilerplate sections into neighboring content before embedding |
 | Vector store | Builds a persistent ChromaDB collection named `discharge_notes` under `data/processed/chroma_db/` |
 | Embeddings | Uses ChromaDB's default local embedding function; first run may download the model cache |
+| Patient-scoped querying | Applies a relevance-distance threshold, over-fetches candidates, and removes highly similar chunks before returning context |
 | Validation | Runs broad clinical queries and patient-scoped retrieval checks with metadata inspection |
 
 Latest agent-orchestration summary:
@@ -278,6 +289,7 @@ Latest agent-orchestration summary:
 | Reasoning | Groq-hosted LLM drafts a care-coordination plan from retrieved context plus the validated risk-assessment line |
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
+| Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -301,7 +313,8 @@ logging/model saving, fairness-audit infrastructure, section-aware note
 chunking, ChromaDB vector-store indexing, FastAPI model serving, patient-scoped
 retrieval, risk-model-to-agent integration, dynamic retrieval categories,
 grounded care-plan drafting, second-model critique, and risk-gated LangGraph
-orchestration.
+orchestration, plus an auditable tool-calling chat agent for free-form patient
+questions.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -311,9 +324,9 @@ inconclusive at this dataset size because most protected subgroups do not have
 enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
-audit, investigating duplicate/near-duplicate retrieval chunks, strengthening
-reasoning/critique model independence, adding persistence/audit services, and
-building the clinician-facing review workflow.
+audit, calibrating retrieval distance thresholds against labeled relevance
+examples, strengthening reasoning/critique model independence, adding
+persistence/audit services, and building the clinician-facing review workflow.
 
 ## Getting started
 
@@ -386,6 +399,7 @@ python -m src.agents.reasoning_agent <patient_id>
 python -m src.agents.critique_agent <patient_id>
 python -m src.agents.risk_tool <patient_id>
 python -m src.agents.orchestrator <patient_id>
+python -m src.agents.chat_agent "For patient <patient_id>, should we be worried about readmission risk and why?"
 ```
 
 ### API smoke tests
@@ -471,6 +485,7 @@ python -m src.agents.retrieval_agent <patient_id>
 python -m src.agents.retrieval_agent <patient_id> --dynamic
 python -m src.agents.risk_tool <patient_id>
 python -m src.agents.orchestrator <patient_id>
+python -m src.agents.chat_agent "For patient <patient_id>, what medications and follow-up needs are documented?"
 ```
 
 ### Running tests
@@ -482,7 +497,7 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 
 ```text
 src/
-|-- agents/       # Risk tool, retrieval, reasoning, critique, and LangGraph orchestration
+|-- agents/       # Risk tool, retrieval, reasoning, critique, chat, and orchestration
 |-- api/          # FastAPI model serving, dynamic request schema, drift report
 |-- embeddings/   # Section-aware note chunking and Chroma vector-store build
 |-- retrieval/    # Patient-scoped Chroma queries with relevance thresholding
@@ -533,7 +548,7 @@ or data use agreement is required to run or demo it. See
 | --- | --- |
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
-| Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories |
+| Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
 | Implemented API | FastAPI, Uvicorn, Pydantic |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned frontend | React or Streamlit for MVP |

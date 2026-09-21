@@ -310,33 +310,82 @@ repeated content once rather than restating it — but the underlying
 duplicate-chunk question (flagged earlier, also not chased down) likely
 explains this pattern and remains open.
 
+## Chat Agent — Real LLM Tool-Calling (#6)
+
+**Status: Working, validated across multiple query types, two real bugs
+found and fixed during testing.**
+
+Built `src/agents/chat_agent.py` and `src/agents/tools.py` as a second,
+genuinely different interface alongside the deterministic orchestrator.
+Where the orchestrator always runs the same fixed sequence (risk ->
+retrieval -> reasoning -> critique), this agent uses real Groq
+function-calling: an LLM decides, per question, whether to call
+`assess_readmission_risk`, `search_patient_chart`, both, or neither.
+
+Both interfaces are intentionally kept — the orchestrator remains the
+right tool for "a discharge just happened, produce an auditable draft
+plan" (deterministic, easy to test); the chat agent is for ad hoc
+questions a clinician might ask, where a fixed pipeline would be either
+too heavy (for a simple lookup) or too rigid (for an open-ended question
+needing a mix of sources).
+
+Every tool call, from either interface, goes through the exact same
+audited functions (`risk_tool.assess_risk`,
+`query_store.retrieve_relevant_context`) — the chat agent's flexibility
+doesn't come at the cost of a separate, unaudited code path. Every call
+is logged (name, arguments, result) and returned alongside the answer.
+
+### Two real bugs found and fixed during validation
+
+1. **Vague query phrasing caused false negatives.** The `search_patient_chart`
+   tool originally let the model choose any free-text query. On an
+   open-ended question, it chose `"discharge summary"` — a phrase that
+   doesn't match how notes are actually sectioned — got a genuine "no
+   relevant documentation found," and then incorrectly told the user the
+   chart lacked medication information that earlier testing had already
+   confirmed *was* retrievable with the right phrasing. Fixed by
+   constraining the tool's query description to the 5 phrasings already
+   validated throughout this project's retrieval work (see
+   `retrieval_agent.py`'s `RETRIEVAL_CATEGORIES`).
+
+2. **A prompt-editing mistake dropped a required instruction.** An
+   intermediate fix (nudging the model toward multiple targeted chart
+   searches) accidentally omitted the earlier instruction to always call
+   `assess_readmission_risk` for open-ended questions. Result: the agent
+   answered "no obvious high-risk medical problem" for a patient
+   objectively at the 90th percentile on the trained model — a
+   confidently wrong conclusion, not an honest gap. Caught via the same
+   before/after re-test discipline used throughout this project, fixed
+   by combining both instructions into one complete prompt block.
+
+### Confirmed final behavior
+- Narrow risk question -> only `assess_readmission_risk` called
+- Narrow chart question -> only `search_patient_chart` called, with a
+  validated query phrasing
+- Open-ended "should I be worried" question -> both tools called,
+  multiple targeted chart searches, correct risk category stated,
+  recommendations grounded in actual retrieved content rather than
+  generic boilerplate
+- Consistently surfaces real documentation inconsistencies (e.g. a
+  medication list that contradicts the same note's "No Active
+  Medications" line) without being specifically prompted to
+
 ## Next steps
 
 1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
 2. ~~Begin the agent orchestration layer~~ — **Done.**
-3. ~~Connect the risk model to the agent pipeline~~ — **Done.** Risk
-   assessment now drives conditional routing and informs both retrieval
-   and reasoning/critique context. See "Agent Workflow — Risk Model
-   Integration" section above.
-4. Revisit the fairness audit once population size increases — **still
-   open.** ~8,000-10,000+ patients needed for a determinate race-based
-   comparison at current event rates.
-5. Investigate the duplicate/repeated-chunk pattern in retrieval results
-   — now observed in two forms (near-duplicate chunks across encounters,
-   and heavy internal repetition within a single chunk). Determine root
-   cause (genuine duplicate documentation vs. an indexing artifact)
-   before it's relied on for anything beyond a portfolio demo.
-6. Address the reasoning/critique model independence gap — both
-   currently run on OpenAI's open-weight models (120B/20B), same
-   company, different sizes. Revisit if a genuinely different-company
-   model becomes confirmed-working on the project's Groq account.
-7. Consider whether the risk model itself should become an LLM-callable
-   tool (function-calling) rather than a fixed pipeline step — the
-   current design has the orchestrator always call it first; a more
-   agentic version could let an LLM decide independently when
-   reassessment is warranted (e.g. mid-conversation, on new information).
-   Deliberately not done yet: the current deterministic "always assess,
-   then route" design is easier to audit and test than a fully
-   LLM-decided call pattern would be.
-8. Wire up the Clinician Web App layer (React UI — risk queue dashboard,
+3. ~~Connect the risk model to the agent pipeline~~ — **Done.**
+4. Revisit the fairness audit once population size increases — still open.
+5. ~~Investigate the duplicate/repeated-chunk pattern~~ — **Done.** Both
+   symptoms traced to real, non-bug root causes (genuine dense clinical
+   documentation; genuinely different encounters with similar Synthea-
+   templated text). Added a text-similarity diversity filter as a
+   retrieval-quality improvement.
+6. ~~Risk model as an LLM-callable tool~~ — **Done.** See "Chat Agent"
+   section above.
+7. Address the reasoning/critique model independence gap — still open
+   (both currently OpenAI open-weight models, different sizes only).
+8. **Next up:** Clinician Web App (React UI — risk queue dashboard,
    patient detail/plan review) per the original architecture.
+9. Once the functional pieces above are stable, apply production-grade
+   architecture and tech-stack hardening (spec to be provided).
