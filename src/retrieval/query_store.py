@@ -30,6 +30,12 @@ def get_collection() -> chromadb.Collection:
     return client.get_collection(COLLECTION_NAME)
 
 
+from difflib import SequenceMatcher
+
+def _too_similar(text_a: str, text_b: str, threshold: float = 0.85) -> bool:
+    return SequenceMatcher(None, text_a, text_b).ratio() > threshold
+
+
 def retrieve_relevant_context(
     collection: chromadb.Collection,
     patient_id: str,
@@ -37,29 +43,31 @@ def retrieve_relevant_context(
     n_results: int = 3,
     distance_threshold: float = RELEVANCE_DISTANCE_THRESHOLD,
 ) -> list[dict] | None:
-    results = collection.query(
-        query_texts=[query],
-        n_results=n_results,
-        where={"patient_id": patient_id},
-    )
+    """
+    Over-fetches candidates, then skips any result whose text is highly
+    similar to one already selected — regardless of encounter_id.
+    Confirmed necessary via real data: near-identical results can come
+    from genuinely DIFFERENT encounters (Synthea's templated notes
+    reusing the same boilerplate when a patient's facts are stable
+    between visits), so deduping by encounter_id alone misses this case.
+    """
+    fetch_n = max(n_results * 3, 10)
+    results = collection.query(query_texts=[query], n_results=fetch_n, where={"patient_id": patient_id})
 
     if not results["documents"][0]:
         return None
 
-    relevant = [
-        {
-            "text": doc,
-            "section": meta["section_name"],
-            "distance": dist,
-            "encounter_id": meta["encounter_id"],
-        }
-        for doc, meta, dist in zip(
-            results["documents"][0], results["metadatas"][0], results["distances"][0]
-        )
-        if dist <= distance_threshold
-    ]
+    selected = []
+    for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+        if dist > distance_threshold:
+            continue
+        if any(_too_similar(doc, s["text"]) for s in selected):
+            continue
+        selected.append({"text": doc, "section": meta["section_name"], "distance": dist, "encounter_id": meta["encounter_id"]})
+        if len(selected) >= n_results:
+            break
 
-    return relevant if relevant else None
+    return selected if selected else None
 
 
 if __name__ == "__main__":
