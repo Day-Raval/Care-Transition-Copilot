@@ -40,6 +40,7 @@ LOW_RISK_CATEGORY = "low"  # matches src/api/main.py's _categorize()
 
 class PipelineState(TypedDict):
     patient_id: str
+    patient_name: str
     risk_score: float
     risk_percentile: float
     risk_category: str
@@ -63,6 +64,7 @@ def _risk_context_line(state: PipelineState) -> str:
 def risk_assessment_node(state: PipelineState) -> dict:
     result = assess_risk(state["patient_id"])
     return {
+        "patient_name": result["patient_name"],
         "risk_score": result["risk_score"],
         "risk_percentile": result["risk_percentile"],
         "risk_category": result["risk_category"],

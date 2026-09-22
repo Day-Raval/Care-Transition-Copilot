@@ -66,11 +66,26 @@ def calculate_age_years(birth_date: str, as_of: str) -> int:
         years -= 1
     return years
 
+def extract_patient_name(patient: dict) -> str:
+    """
+    Patient.name is a list; Synthea always puts the official name first.
+    Given is a list too (first + middle); use just the first given name
+    plus family, matching how Synthea's own note text refers to patients
+    (e.g. "Elwood28 Barton704") -- confirmed against real bundles.
+    """
+    names = patient.get("name", [])
+    if not names:
+        return "Unknown Patient"
+    official = next((n for n in names if n.get("use") == "official"), names[0])
+    given = official.get("given", ["Unknown"])[0]
+    family = official.get("family", "")
+    return f"{given} {family}".strip()
+
 
 def build_record(entries: list[dict], episode: dict, all_patient_episodes: list[dict], cfg: Config) -> DischargeRecord:
     patient = next(r for r in entries if r["resourceType"] == "Patient")
     patient_id = patient["id"]
-
+    patient_name = extract_patient_name(patient)
     admit_ts = episode["start"]
     discharge_ts = episode["end"]
     episode_encounters = episode["encounters"]
@@ -114,6 +129,7 @@ def build_record(entries: list[dict], episode: dict, all_patient_episodes: list[
 
     record = DischargeRecord(
         patient_id=patient_id,
+        patient_name=patient_name,
         encounter_id=first_encounter["id"],
         admit_ts=admit_ts,
         discharge_ts=discharge_ts,

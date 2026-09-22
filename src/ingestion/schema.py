@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 @dataclass
 class DischargeRecord:
     patient_id: str
+    patient_name: str
     encounter_id: str
     admit_ts: str
     discharge_ts: str

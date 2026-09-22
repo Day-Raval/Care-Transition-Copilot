@@ -1,7 +1,7 @@
 """
-Tool schemas for the chat agent — exposes assess_readmission_risk() and
-search_patient_chart() as functions an LLM can call via Groq's
-OpenAI-compatible function-calling API.
+Tool schemas for the chat agent — exposes find_patient_by_name(),
+assess_readmission_risk(), and search_patient_chart() as functions an
+LLM can call via Groq's OpenAI-compatible function-calling API.
 
 This is deliberately SEPARATE from orchestrator.py's fixed pipeline.
 The orchestrator is the right tool for "a discharge just happened,
@@ -15,14 +15,42 @@ search_patient_chart's query description was tightened after a real
 failure: the model chose "discharge summary" as a free-text query for
 an open-ended question, got a genuine "no relevant documentation found"
 back, and then incorrectly told the user the chart lacked information
-(medications) that Day-earlier testing already confirmed IS retrievable
+(medications) that earlier testing already confirmed IS retrievable
 with a specific query like "current medications at discharge". The
 fix reuses the exact 5 category phrasings already validated throughout
 this project (see retrieval_agent.py's RETRIEVAL_CATEGORIES) instead of
 leaving query phrasing entirely to the model's judgment.
+
+find_patient_by_name added so users can refer to a patient by name
+instead of by patient_id. Normalizes digits out of both the query and
+the stored name before comparing — confirmed necessary via testing,
+since Synthea's generated names have digit suffixes baked in (e.g.
+"Hai304 Marvin195"), so a natural query like "Hai Marvin" fails a plain
+substring match against the raw stored name.
 """
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "find_patient_by_name",
+            "description": (
+                "Looks up a patient's patient_id from their name. Use this FIRST "
+                "whenever the user refers to a patient by name instead of by ID -- "
+                "the other tools require a patient_id, not a name. Matches "
+                "partially and case-insensitively, so a first name or partial "
+                "name is enough. May return more than one match if the name is "
+                "ambiguous; ask the user to clarify which one if so."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Full or partial patient name, e.g. 'Hai Marvin' or just 'Marvin'"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -91,6 +119,28 @@ def dispatch_tool_call(name: str, arguments: dict) -> str:
     """
     import sys
     sys.path.insert(0, ".")
+
+    if name == "find_patient_by_name":
+        import re
+
+        import pandas as pd
+        from src.utils.config import load_config
+        cfg = load_config()
+        df = pd.read_csv(cfg.output_csv.replace(".csv", "_with_target.csv"))
+
+        def normalize(s: str) -> str:
+            return re.sub(r"\d+", "", s).strip().lower()
+
+        query = normalize(arguments["name"])
+        matches = df[df["patient_name"].apply(lambda n: query in normalize(n))]
+        matches = matches.drop_duplicates(subset="patient_id")
+        if matches.empty:
+            return f"No patient found matching '{arguments['name']}'."
+        if len(matches) > 1:
+            listing = "\n".join(f"- {r.patient_name} (patient_id: {r.patient_id})" for r in matches.itertuples())
+            return f"Multiple patients match '{arguments['name']}'. Ask the user which one:\n{listing}"
+        row = matches.iloc[0]
+        return f"Found: {row['patient_name']} (patient_id: {row['patient_id']})"
 
     if name == "assess_readmission_risk":
         from src.agents.risk_tool import assess_risk

@@ -1,22 +1,17 @@
 """
-Patient-scoped retrieval with a relevance threshold — the actual function
-the retrieval agent will call, not just a raw ChromaDB query wrapper.
+Patient-scoped retrieval with a relevance threshold.
 
-Why the threshold matters: ChromaDB's query() always returns the top-N
-closest chunks, even when NONE of them are genuinely relevant (confirmed:
-querying a patient with no heart failure history for "heart failure
-medications" still returned their 3 closest chunks — unrelated oncology
-content — because query() has no concept of "not relevant enough," only
-"closest available"). Without a threshold, a clinician-facing agent could
-end up citing unrelated chart history as if it answered the question.
-
-RELEVANCE_DISTANCE_THRESHOLD is a starting estimate, not calibrated
-against a labeled relevant/irrelevant dataset — revisit once the
-retrieval agent is in real use and you can observe which distances
-correlate with actually-useful vs. actually-irrelevant results.
+RELEVANCE_DISTANCE_THRESHOLD calibrated against one confirmed real true
+positive: a genuine "heart failure" mention ranked #2 for a directly
+relevant query at distance 1.2516 (found via
+scripts/rank_all_chunks_for_patient.py). Original guess of 1.1 excluded
+this real match. 1.3 keeps it while still excluding clearly weaker
+matches. Still a single-data-point calibration — revisit with more
+examples once the retrieval agent is in real use.
 """
 
 import sys
+import threading
 import chromadb
 
 sys.path.insert(0, ".")
@@ -24,16 +19,36 @@ from src.embeddings.build_vector_store import CHROMA_PATH, COLLECTION_NAME
 
 RELEVANCE_DISTANCE_THRESHOLD = 1.3
 
+_collection = None
+_lock = threading.Lock()
+
 
 def get_collection() -> chromadb.Collection:
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    return client.get_collection(COLLECTION_NAME)
+    """
+    Reuses a single cached PersistentClient/Collection instance across
+    all calls, instead of creating a fresh one every time.
 
-
-from difflib import SequenceMatcher
-
-def _too_similar(text_a: str, text_b: str, threshold: float = 0.85) -> bool:
-    return SequenceMatcher(None, text_a, text_b).ratio() > threshold
+    Confirmed necessary via a real production error: creating a new
+    chromadb.PersistentClient() on every call works fine for one-shot
+    CLI scripts, but breaks under the FastAPI web app -- each request
+    can run in a different worker thread, and creating/tearing down
+    PersistentClient instances concurrently against the same path
+    corrupts ChromaDB's internal shared-system registry
+    ('RustBindingsAPI' object has no attribute 'bindings', followed by
+    a KeyError in _create_system_if_not_exists on the next request).
+    A single client, created once and reused (double-checked locking
+    for thread safety), avoids this entirely. Confirmed via testing:
+    20 concurrent calls (simulating FastAPI's thread pool) now construct
+    PersistentClient exactly once and all return the same collection
+    with zero exceptions.
+    """
+    global _collection
+    if _collection is None:
+        with _lock:
+            if _collection is None:  # re-check inside the lock
+                client = chromadb.PersistentClient(path=CHROMA_PATH)
+                _collection = client.get_collection(COLLECTION_NAME)
+    return _collection
 
 
 def retrieve_relevant_context(
@@ -46,11 +61,12 @@ def retrieve_relevant_context(
     """
     Over-fetches candidates, then skips any result whose text is highly
     similar to one already selected — regardless of encounter_id.
-    Confirmed necessary via real data: near-identical results can come
-    from genuinely DIFFERENT encounters (Synthea's templated notes
-    reusing the same boilerplate when a patient's facts are stable
-    between visits), so deduping by encounter_id alone misses this case.
     """
+    from difflib import SequenceMatcher
+
+    def _too_similar(text_a: str, text_b: str, threshold: float = 0.85) -> bool:
+        return SequenceMatcher(None, text_a, text_b).ratio() > threshold
+
     fetch_n = max(n_results * 3, 10)
     results = collection.query(query_texts=[query], n_results=fetch_n, where={"patient_id": patient_id})
 
@@ -68,23 +84,3 @@ def retrieve_relevant_context(
             break
 
     return selected if selected else None
-
-
-if __name__ == "__main__":
-    # Quick manual test — pass a patient_id and query as CLI args, or
-    # edit these two lines directly for a one-off check.
-    if len(sys.argv) < 3:
-        print("Usage: python3 -m src.retrieval.query_store <patient_id> <query text>")
-        sys.exit(1)
-
-    patient_id, query = sys.argv[1], " ".join(sys.argv[2:])
-    collection = get_collection()
-    result = retrieve_relevant_context(collection, patient_id, query)
-
-    if result is None:
-        print(f"No relevant chart history found for patient {patient_id[:12]} matching: \"{query}\"")
-    else:
-        print(f"Found {len(result)} relevant chunk(s):")
-        for r in result:
-            print(f"  [{r['section']}] distance={r['distance']:.4f}")
-            print(f"    {r['text'][:150]}")

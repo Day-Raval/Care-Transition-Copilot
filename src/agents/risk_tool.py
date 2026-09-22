@@ -26,12 +26,6 @@ API_BASE_URL = os.getenv("RISK_API_BASE_URL", "http://localhost:8080")
 
 
 def get_patient_features(patient_id: str) -> dict:
-    """
-    Looks up this patient's most recent episode's features from the
-    processed dataset. Raises ValueError if the patient isn't found —
-    fail loudly rather than silently defaulting to some placeholder
-    feature set.
-    """
     cfg = load_config()
     df = pd.read_csv(cfg.output_csv.replace(".csv", "_with_target.csv"))
     patient_rows = df[df["patient_id"] == patient_id]
@@ -47,16 +41,11 @@ def get_patient_features(patient_id: str) -> dict:
         "prior_admissions_90d": int(row["prior_admissions_90d"]),
         "med_flag_diuretic": bool(row["med_flag_diuretic"]),
         "med_flag_anticoagulant": bool(row["med_flag_anticoagulant"]),
-    }, str(row.get("admission_reason", "unknown"))
+    }, str(row.get("admission_reason", "unknown")), str(row.get("patient_name", "Unknown Patient"))
 
 
 def assess_risk(patient_id: str) -> dict:
-    """
-    Calls the live Model Serving API. Raises RuntimeError with the exact
-    fix if the API isn't reachable — this should fail loudly, not
-    silently proceed as if the patient were low-risk.
-    """
-    features, admission_reason = get_patient_features(patient_id)
+    features, admission_reason, patient_name = get_patient_features(patient_id)
 
     try:
         response = requests.post(f"{API_BASE_URL}/predict", json=features, timeout=10)
@@ -69,6 +58,7 @@ def assess_risk(patient_id: str) -> dict:
 
     result = response.json()
     result["admission_reason"] = admission_reason
+    result["patient_name"] = patient_name
     return result
 
 

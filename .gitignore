@@ -20,3 +20,25 @@ results/prediction_log.csv
 
 # Chroma database for vector store
 data/processed/chroma_db/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment variables (if you ever add a web/.env for VITE_API_BASE_URL overrides)
+.env
+.env.local
+.env.*.local
+
+# Editor/OS
+.vscode/
+.DS_Store
+*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

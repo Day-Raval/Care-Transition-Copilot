@@ -58,6 +58,44 @@ class ModelInfo(BaseModel):
     fairness_status: str
     disclaimer: str
 
+class QueueItem(BaseModel):
+    patient_id: str
+    patient_name: str
+    discharge_ts: str
+    admission_reason: str
+    risk_score: float
+    risk_percentile: float
+    risk_category: str
+
+
+class FullAssessment(BaseModel):
+    patient_id: str
+    patient_name: str
+    risk_score: float
+    risk_percentile: float
+    risk_category: str
+    admission_reason: str
+    patient_context_summary: str
+    categories_with_no_match: list[str]
+    draft_plan: str
+    critique_notes: str
+    disclaimer: str
+
+
+class ChatRequest(BaseModel):
+    question: str
+
+
+class ChatToolCall(BaseModel):
+    name: str
+    arguments: dict
+    result: str
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    tool_calls: list[ChatToolCall]
+
 
 class DriftReport(BaseModel):
     status: str

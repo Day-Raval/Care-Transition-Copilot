@@ -47,6 +47,7 @@ with open(cfg.output_notes, "w") as f:
         f.write(json.dumps({
             "encounter_id": r.encounter_id,
             "patient_id": r.patient_id,
+            "patient_name": r.patient_name,
             "discharge_ts": r.discharge_ts,
             "note_text": r.discharge_note_text,
         }) + "\n")
