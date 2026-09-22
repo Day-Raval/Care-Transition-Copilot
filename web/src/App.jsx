@@ -1,12 +1,14 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
 import Dashboard from "./components/Dashboard.jsx";
 import ChatInterface from "./components/ChatInterface.jsx";
+import Patients from "./components/Patients.jsx";
+import CarePlans from "./components/CarePlans.jsx";
 
 const NAV_ITEMS = [
   { label: "Risk queue", path: "/", enabled: true },
   { label: "Ask a question", path: "/chat", enabled: true },
-  { label: "Patients", path: null, enabled: false },
-  { label: "Care plans", path: null, enabled: false },
+  { label: "Patients", path: "/patients", enabled: true },
+  { label: "Care plans", path: "/care-plans", enabled: true },
   { label: "Fairness", path: null, enabled: false },
   { label: "Audit log", path: null, enabled: false },
 ];
@@ -50,6 +52,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/chat" element={<ChatInterface />} />
+            <Route path="/patients" element={<Patients />} />
+            <Route path="/care-plans" element={<CarePlans />} />
           </Routes>
         </div>
       </div>

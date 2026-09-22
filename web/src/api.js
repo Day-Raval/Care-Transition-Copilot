@@ -1,15 +1,35 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
+const DEMO_API_KEY = import.meta.env.VITE_DEMO_API_KEY || "";
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed: ${res.status}`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const headers = {
+    "Content-Type": "application/json",
+    ...(DEMO_API_KEY ? { "x-demo-token": DEMO_API_KEY } : {}),
+    ...(options.headers || {}),
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed: ${res.status}`);
+    }
+    return res.json();
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error("Request timed out. The API may still be generating a response.");
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return res.json();
 }
 
 export function getQueue(category = null, limit = 50) {
@@ -20,6 +40,10 @@ export function getQueue(category = null, limit = 50) {
 
 export function getAssessment(patientId) {
   return request(`/patients/${patientId}/assessment`);
+}
+
+export function getSavedCarePlans(limit = 50) {
+  return request(`/care-plans?${new URLSearchParams({ limit })}`);
 }
 
 export function sendChatMessage(question) {
