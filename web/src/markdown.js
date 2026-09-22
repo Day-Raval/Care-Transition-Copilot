@@ -1,6 +1,6 @@
 // Minimal markdown renderer for the specific subset the reasoning and
-// critique agents actually produce: **bold**, "- " bullet lists,
-// "1. " numbered lists, and paragraph breaks. Not a general-purpose
+// critique/chat agents actually produce: headings, **bold**, "- " or
+// "* " bullet lists, "1. " numbered lists, and paragraph breaks. Not a general-purpose
 // markdown parser -- deliberately small and specific to what's actually
 // needed, tested against real LLM output from this project rather than
 // invented sample text.
@@ -32,10 +32,15 @@ export function renderMarkdown(text) {
       .replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-    const bulletMatch = bold.match(/^-\s+(.*)/);
+    const headingMatch = bold.match(/^(#{1,3})\s+(.*)/);
+    const bulletMatch = bold.match(/^[-*]\s+(.*)/);
     const numberedMatch = bold.match(/^\d+\.\s+(.*)/);
 
-    if (bulletMatch) {
+    if (headingMatch) {
+      closeList();
+      const level = headingMatch[1].length + 2;
+      html += `<h${level}>${headingMatch[2]}</h${level}>`;
+    } else if (bulletMatch) {
       if (inList !== "ul") {
         closeList();
         html += "<ul>";

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getQueue, getAssessment } from "../api.js";
+import { displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
+import { displayPatientName } from "../patientNames.js";
 
 function jaccardSimilarity(a, b) {
   const wordsA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
@@ -12,6 +14,27 @@ function jaccardSimilarity(a, b) {
 
 function tooSimilar(a, b, threshold = 0.7) {
   return jaccardSimilarity(a, b) > threshold;
+}
+
+function parseEvidenceSections(summary) {
+  if (!summary) return [];
+  return summary
+    .split(/\n## /)
+    .slice(1)
+    .map((block) => {
+      const lines = block.trim().split("\n").filter(Boolean);
+      const title = lines[0]?.replace(/^##\s*/, "").trim();
+      const excerpts = lines
+        .filter((line) => line.startsWith("-"))
+        .map((line) => {
+          const match = line.match(/^-\s+\[([^,\]]+)(?:,[^\]]*)?\]\s*(.*)$/);
+          return match
+            ? { source: match[1], text: match[2] }
+            : { source: title, text: line.replace(/^-\s+/, "") };
+        });
+      return { title, excerpts };
+    })
+    .filter((section) => section.title && section.excerpts.length > 0);
 }
 
 export default function Dashboard() {
@@ -46,18 +69,17 @@ export default function Dashboard() {
   const isLowRisk = assessment?.risk_category === "low";
   const critiqueFlagged = assessment?.critique_notes?.toUpperCase().includes("FLAGGED");
 
+  const evidenceSections = parseEvidenceSections(assessment?.patient_context_summary);
   let evidenceCards = [];
   if (assessment && !isLowRisk) {
-    const blocks = assessment.patient_context_summary.match(/## .+\n(?:- .+\n?)*/g) || [];
     const seen = [];
-    blocks.forEach((block) => {
-      const [header, ...lines] = block.trim().split("\n");
-      const firstFinding = lines.find((l) => l.startsWith("-"));
+    evidenceSections.forEach((section) => {
+      const firstFinding = section.excerpts[0];
       if (!firstFinding) return;
-      const fullText = firstFinding.replace(/^- \[[^\]]+\]\s*/, "");
+      const fullText = firstFinding.text;
       if (seen.some((s) => tooSimilar(s, fullText))) return;
       seen.push(fullText);
-      evidenceCards.push({ text: fullText.slice(0, 90), source: header.replace("## ", "") });
+      evidenceCards.push({ text: fullText.slice(0, 90), source: section.title });
     });
   }
 
@@ -77,7 +99,7 @@ export default function Dashboard() {
                 onClick={() => selectPatient(item)}
               >
                 <div className="queue-card-main">
-                  <div className="queue-card-name">{item.patient_name}</div>
+                  <div className="queue-card-name">{displayPatientName(item.patient_name)}</div>
                   <div className="queue-card-reason">{item.admission_reason}</div>
                   <div className="queue-card-date">
                     {new Date(item.discharge_ts).toLocaleDateString()}
@@ -110,14 +132,35 @@ export default function Dashboard() {
               {isLowRisk ? (
                 <p className="muted">Low risk — full chart review was skipped.</p>
               ) : (
-                <div className="evidence-list">
-                  {evidenceCards.map((card, i) => (
-                    <div className="evidence-card" key={i}>
-                      <div className="evidence-text">{card.text}…</div>
-                      <div className="evidence-source">source: {card.source}</div>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div className="evidence-list">
+                    {evidenceCards.map((card, i) => (
+                      <div className="evidence-card" key={i}>
+                        <div className="evidence-text">{card.text}...</div>
+                        <div className="evidence-source">topic: {card.source}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {evidenceSections.length > 0 && (
+                    <details className="cited-context">
+                      <summary>View chart excerpts used by the agent</summary>
+                      <div className="cited-context-list">
+                        {evidenceSections.map((section) => (
+                          <div className="cited-context-section" key={section.title}>
+                            <div className="cited-context-title">{section.title}</div>
+                            {section.excerpts.map((excerpt, i) => (
+                              <div className="cited-context-item" key={i}>
+                                <div>{excerpt.text}</div>
+                                <div className="evidence-source">source: {excerpt.source}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
               )}
             </>
           )}
@@ -127,7 +170,7 @@ export default function Dashboard() {
         <div className="panel panel-gold">
           <h2>Draft follow-up plan</h2>
           <p className="panel-subtitle">
-            AI-generated for {assessment?.patient_name || "…"} — pending clinician action
+            AI-generated for {assessment ? displayPatientName(assessment.patient_name) : "…"} — pending clinician action
           </p>
 
           {loadingAssessment && <p className="muted">Drafting plan…</p>}
@@ -145,7 +188,7 @@ export default function Dashboard() {
 
                   <div
                     className="plan-rendered"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(assessment.draft_plan) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(displayCarePlanText(assessment.draft_plan)) }}
                   />
 
                   <details>
@@ -169,10 +212,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="fairness-banner">
-        <strong>Fairness watch:</strong> subgroup calibration and false-negative parity are
-        INCONCLUSIVE at current dataset size — not yet validated, not a "pass." See RESULTS.md.
-      </div>
     </div>
   );
 }

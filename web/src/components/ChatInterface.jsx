@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { sendChatMessage } from "../api.js";
+import { renderMarkdown } from "../markdown.js";
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState([]);
@@ -67,7 +68,14 @@ export default function ChatInterface() {
                 </div>
               )}
               <div className="bubble" style={m.isError ? { color: "var(--danger)" } : {}}>
-                {m.content}
+                {m.role === "assistant" && !m.isError ? (
+                  <div
+                    className="chat-rendered"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
+                  />
+                ) : (
+                  m.content
+                )}
               </div>
             </div>
           ))}

@@ -159,6 +159,34 @@ body {
 }
 .evidence-text { font-weight: 600; font-size: 13px; }
 .evidence-source { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.cited-context { margin-top: 12px; }
+.cited-context-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.cited-context-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #FFFFFF;
+}
+.cited-context-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 6px;
+}
+.cited-context-item {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.cited-context-item:first-of-type { border-top: 0; padding-top: 0; }
+.cited-context-missing {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px;
+}
 
 /* Draft plan panel */
 .checklist-label { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
@@ -207,13 +235,55 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
 .chat-message.user { margin-left: auto; }
 .chat-message .bubble { padding: 12px 16px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
 .chat-message.user .bubble { background: var(--navy); color: white; }
-.chat-message.assistant .bubble { background: var(--bg); border: 1px solid var(--border); white-space: pre-wrap; }
+.chat-message.assistant .bubble { background: var(--bg); border: 1px solid var(--border); }
+.chat-rendered p { margin: 0 0 10px 0; }
+.chat-rendered p:last-child { margin-bottom: 0; }
+.chat-rendered h3,
+.chat-rendered h4,
+.chat-rendered h5 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: var(--navy);
+}
+.chat-rendered h3:first-child,
+.chat-rendered h4:first-child,
+.chat-rendered h5:first-child { margin-top: 0; }
+.chat-rendered ul,
+.chat-rendered ol { margin: 0 0 10px 0; padding-left: 20px; }
+.chat-rendered li { margin-bottom: 4px; }
+.chat-rendered strong { color: var(--navy); }
 .tool-call-log { font-size: 12px; color: var(--text-muted); background: #F0F2F5; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
 .tool-call-log .tool-name { font-weight: 600; color: var(--teal); }
 .chat-input-bar { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .chat-input-bar input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; }
 .chat-input-bar button { padding: 10px 20px; border-radius: 8px; border: none; background: var(--teal); color: white; cursor: pointer; font-size: 14px; }
 .chat-input-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.patient-table { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.patient-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 2fr) 120px 150px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.patient-row:last-child { border-bottom: 0; }
+.patient-row-header {
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.patient-id { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.care-plan-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
 
 .loading, .error-message { padding: 20px; color: var(--text-muted); }
 .error-message { color: var(--danger); }
