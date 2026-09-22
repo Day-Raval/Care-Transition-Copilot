@@ -32,11 +32,14 @@ INCONCLUSIVE, not passed (see results/RESULTS.md) — every response
 carries that disclaimer.
 """
 
+import logging
+import os
 import sys
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()  # must run before /assessment or /chat are ever called —
@@ -46,6 +49,7 @@ load_dotenv()  # must run before /assessment or /chat are ever called —
 
 sys.path.insert(0, ".")
 from src.api.drift_monitor import compute_drift_report, log_prediction
+from src.api.production import CARE_PLANS_PATH, log_audit_event, read_jsonl, runtime_dependency_report, save_care_plan
 from src.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -61,6 +65,7 @@ from src.utils.config import load_config
 from src.utils.logging_config import setup_logging
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
     "Research/portfolio baseline model. Trained on ~52 positive events — "
@@ -85,6 +90,25 @@ app.add_middleware(
 _state = {}
 
 
+@app.middleware("http")
+async def optional_demo_auth(request: Request, call_next):
+    expected_token = os.getenv("DEMO_API_KEY")
+    if expected_token and request.url.path != "/health":
+        provided_token = request.headers.get("x-demo-token")
+        if provided_token != expected_token:
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid demo token"})
+    return await call_next(request)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled API error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Unexpected server error. Check the API logs for details."},
+    )
+
+
 def _categorize(percentile: float) -> str:
     if percentile >= 80:
         return "high"
@@ -96,11 +120,18 @@ def _categorize(percentile: float) -> str:
 @app.on_event("startup")
 def load_production_model():
     cfg = load_config()
+    dependencies = runtime_dependency_report(cfg)
+    _state["runtime_dependencies"] = dependencies
     if not cfg.production_run_id:
         raise RuntimeError(
             "config.yaml has no model.production_run_id set. Check "
             "results/experiments.csv for the run you want to serve, then add:\n"
             "  model:\n    production_run_id: \"<run_id>\"\nto config.yaml."
+        )
+    if not dependencies["checks"]["processed_dataset"]:
+        raise RuntimeError(
+            "Processed modeling dataset is missing. Expected "
+            f"{cfg.output_csv.replace('.csv', '_with_target.csv')}. Run the data pipeline first."
         )
 
     model, feature_names = load_model(cfg.production_run_id)
@@ -150,7 +181,12 @@ def load_production_model():
 def health():
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    return {"status": "ok", "model_run_id": _state["run_id"]}
+    dependencies = _state.get("runtime_dependencies", {"ready": True, "missing": [], "checks": {}})
+    return {
+        "status": "ok" if dependencies["ready"] else "degraded",
+        "model_run_id": _state["run_id"],
+        "dependencies": dependencies,
+    }
 
 
 @app.get("/model-info", response_model=ModelInfo)
@@ -229,8 +265,9 @@ def patient_assessment(patient_id: str):
         raise HTTPException(status_code=502, detail=str(e))
 
     is_low_risk = result["risk_category"] == LOW_RISK_CATEGORY
-    return FullAssessment(
+    assessment = FullAssessment(
         patient_id=patient_id,
+        patient_name=result["patient_name"],
         risk_score=result["risk_score"],
         risk_percentile=result["risk_percentile"],
         risk_category=result["risk_category"],
@@ -241,6 +278,30 @@ def patient_assessment(patient_id: str):
         critique_notes=result.get("critique_notes", ""),
         disclaimer=DISCLAIMER,
     )
+    save_care_plan(
+        {
+            "patient_id": assessment.patient_id,
+            "patient_name": assessment.patient_name,
+            "risk_category": assessment.risk_category,
+            "risk_percentile": assessment.risk_percentile,
+            "admission_reason": assessment.admission_reason,
+            "draft_plan": assessment.draft_plan,
+            "critique_notes": assessment.critique_notes,
+            "model_run_id": _state["run_id"],
+        }
+    )
+    log_audit_event(
+        "assessment_generated",
+        patient_id=assessment.patient_id,
+        risk_category=assessment.risk_category,
+        risk_percentile=assessment.risk_percentile,
+    )
+    return assessment
+
+
+@app.get("/care-plans")
+def saved_care_plans(limit: int = 50):
+    return read_jsonl(CARE_PLANS_PATH, limit=limit)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -252,6 +313,13 @@ def chat(request: ChatRequest):
         result = ask(request.question)
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    log_audit_event(
+        "chat_completed",
+        question=request.question,
+        tool_calls=result["tool_calls"],
+        answer=result["answer"],
+    )
 
     return ChatResponse(
         answer=result["answer"],

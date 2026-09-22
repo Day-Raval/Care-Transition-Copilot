@@ -21,6 +21,7 @@ import requests
 
 sys.path.insert(0, ".")
 from src.utils.config import load_config
+from src.utils.runtime import RISK_API_TIMEOUT_SECONDS
 
 API_BASE_URL = os.getenv("RISK_API_BASE_URL", "http://localhost:8080")
 
@@ -48,13 +49,20 @@ def assess_risk(patient_id: str) -> dict:
     features, admission_reason, patient_name = get_patient_features(patient_id)
 
     try:
-        response = requests.post(f"{API_BASE_URL}/predict", json=features, timeout=10)
+        response = requests.post(f"{API_BASE_URL}/predict", json=features, timeout=RISK_API_TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.exceptions.ConnectionError:
         raise RuntimeError(
             f"Could not reach the Model Serving API at {API_BASE_URL}. "
             f"Start it first:\n  uvicorn src.api.main:app --port 8080"
         )
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            f"Timed out waiting for the Model Serving API at {API_BASE_URL} "
+            f"after {RISK_API_TIMEOUT_SECONDS:.0f} seconds."
+        )
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Risk API request failed: {e}")
 
     result = response.json()
     result["admission_reason"] = admission_reason

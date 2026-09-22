@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, ".")
 from src.retrieval.query_store import get_collection, retrieve_relevant_context
+from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def generate_dynamic_categories(admission_reason: str, risk_info: dict | None = 
         context_line += f"\nRisk category: {risk_info.get('risk_category', 'unknown')}"
 
     try:
-        client = Groq(api_key=api_key)
+        client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
         response = client.chat.completions.create(
             model=model,
             messages=[

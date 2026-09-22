@@ -25,6 +25,8 @@ import os
 
 from groq import Groq
 
+from src.utils.runtime import LLM_TIMEOUT_SECONDS
+
 CRITIQUE_MODEL = os.getenv("CRITIQUE_MODEL_NAME", "openai/gpt-oss-20b")
 
 CRITIQUE_SYSTEM_PROMPT = """You are reviewing a draft care coordination plan before it reaches a clinician. You will be given the ORIGINAL retrieved chart context and the DRAFT PLAN generated from it by a different model.
@@ -40,7 +42,7 @@ CRITICAL DISTINCTION — read carefully before flagging anything:
 Check specifically for:
 1. HALLUCINATION (per the definition above — an undocumented fact asserted as true, NOT a reasonable recommendation, and NOT the risk assessment line)
 2. OVERREACH — a SPECIFIC clinical decision (e.g. a drug name + dosage, a diagnosis asserted as confirmed) beyond general care-coordination actions like "schedule a visit," "refer to specialist," "reconcile medications"
-3. GLOSSED-OVER GAPS — did the original context have a category marked "(no relevant documentation found)" that the draft failed to mention as a gap?
+3. REVIEW NOTES QUALITY — if the original context has limited support for an important topic, did the draft handle that carefully under "ADDITIONAL REVIEW NOTES" without using the literal phrase "no relevant documentation found"?
 
 Respond in exactly this format:
 STATUS: PASS or FLAGGED
@@ -63,7 +65,7 @@ def critique_plan(patient_context_summary: str, draft_plan: str, risk_context: s
             "(Can reuse your GROQ_API_KEY since both models are on Groq.)"
         )
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
     response = client.chat.completions.create(
         model=CRITIQUE_MODEL,
         messages=[

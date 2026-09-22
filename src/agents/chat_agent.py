@@ -29,9 +29,10 @@ from groq import Groq
 
 sys.path.insert(0, ".")
 from src.agents.tools import TOOLS, dispatch_tool_call
+from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 CHAT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 6
 
 CHAT_SYSTEM_PROMPT = """You are a clinical care-coordination assistant. You can call tools to look up a patient's readmission risk assessment or search their discharge chart, but only when the question actually requires it — don't call a tool just because it's available.
 
@@ -39,7 +40,9 @@ If the user refers to a patient by NAME rather than by patient_id, call find_pat
 
 For open-ended questions about a patient's overall situation, whether concern is warranted, or anything requiring a full picture: ALWAYS call BOTH assess_readmission_risk AND search_patient_chart. Risk score alone doesn't tell you what's documented, and chart content alone doesn't tell you the model's actual risk assessment — a "should I be worried" answer built on only one of the two is incomplete and can be misleading. When searching the chart for such questions, call search_patient_chart MULTIPLE times with different specific queries (e.g. once for medications, once for comorbidities, once for procedures) rather than once with a vague query.
 
-When you do use tool results, ground your answer in exactly what the tools returned. If a tool genuinely returns "no relevant documentation found" after a well-targeted query, say that plainly rather than guessing. If you're asked something the tools can't answer, say so rather than speculating."""
+When you do use tool results, ground your answer in exactly what the tools returned. If a tool genuinely returns "no relevant documentation found" after a well-targeted query, say that plainly rather than guessing. If you're asked something the tools can't answer, say so rather than speculating.
+
+Format the final answer as a clean documented note, not a raw dump. Use short section labels such as "Answer", "Evidence", "Gaps", and "Next steps" when they fit the question. Use hyphen bullets for lists, avoid decorative asterisks, and keep paragraphs concise."""
 def ask(question: str) -> dict:
     """
     Runs the tool-calling loop. Returns {"answer": str, "tool_calls": [...]}
@@ -52,7 +55,7 @@ def ask(question: str) -> dict:
             "GROQ_API_KEY not set. Add it to your .env file as:\n  GROQ_API_KEY=your_key_here"
         )
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
     messages = [
         {"role": "system", "content": CHAT_SYSTEM_PROMPT},
         {"role": "user", "content": question},

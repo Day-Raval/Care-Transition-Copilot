@@ -18,14 +18,16 @@ built specifically around the two failure modes that matter most here:
 1. Hallucination — inventing a medication/diagnosis/procedure not in the
    actual retrieved context. The critique agent checks for this
    independently, but the prompt should minimize it happening at all.
-2. Silently glossing over documentation gaps — if a category came back
-   "no relevant documentation found," the draft needs to say so, not
-   quietly work around the gap as if it weren't there.
+2. Silently overstating what the chart supports — if a topic is not
+   found in the retrieved chart context, do not invent it or present it
+   as documented.
 """
 
 import os
 
 from groq import Groq
+
+from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
@@ -39,7 +41,7 @@ Draft a concise, actionable follow-up plan with exactly these three sections:
 
 2. RECOMMENDED FOLLOW-UP ACTIONS — general care-coordination actions (e.g. timing of a PCP follow-up visit, medication reconciliation, home health referral). Do NOT recommend a specific medication change, dosage, or diagnosis — that is outside your role and must be left to the clinician.
 
-3. DOCUMENTATION GAPS — explicitly list any category that returned "no relevant documentation found." This is important information for the reviewing clinician, not something to omit because it's incomplete.
+3. ADDITIONAL REVIEW NOTES — briefly mention anything the reviewer should double-check or confirm before acting. Do not include the literal phrase "no relevant documentation found"; write a plain, useful note instead, or write "No additional review notes." if nothing stands out.
 
 This is a DRAFT. It will be reviewed by a second, independent model and then a human clinician before any action is taken. Do not present it as a final decision."""
 
@@ -58,7 +60,7 @@ def draft_care_plan(patient_context_summary: str) -> str:
             "GROQ_API_KEY not set. add it to your .env file as:\n  GROQ_API_KEY=your_key_here"
         )
 
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[
