@@ -194,23 +194,26 @@ determined.
 
 ### Reasoning Agent (`src/agents/reasoning_agent.py`)
 Drafts a 3-section follow-up care plan (risk factors, recommended
-actions, documentation gaps) from the retrieved context, using Groq
+actions, additional review notes) from the retrieved context, using Groq
 (`openai/gpt-oss-120b`). Prompt explicitly forbids inventing
 medications/diagnoses/procedures not in the retrieved context, and
-requires documentation gaps to be surfaced, not glossed over.
+requires unsupported or low-confidence areas to be handled as review notes
+rather than hidden or overstated.
 
 Confirmed via testing: correctly grounds claims in retrieved content
 (e.g. "no active medications" reflected accurately); correctly hedges
 on ambiguous source data rather than fabricating precision (a patient's
 notes showed two different ages, 59 and 67, across encounters — the
-draft used ">60 years" rather than picking one arbitrarily); correctly
-lists genuine documentation gaps when they exist.
+draft used ">60 years" rather than picking one arbitrarily); and now
+presents extra reviewer-facing caveats as "Additional review notes"
+instead of raw documentation-gap language.
 
 ### Plan Critique Agent (`src/agents/critique_agent.py`)
 Independent second-model review before a clinician would see the draft,
 using a different model (`openai/gpt-oss-20b`) on the same Groq account.
 Checks for hallucination, clinical overreach (specific dosing/diagnosis
-decisions), and glossed-over documentation gaps.
+decisions), and whether limited chart support is handled carefully in
+additional review notes.
 
 **Real reliability issue found and fixed during validation:** initial
 testing (4 runs across 2 patients) showed the critique agent was
@@ -243,9 +246,8 @@ required API key is missing, rather than silently producing placeholder
 output.
 
 Confirmed working end to end on 2 patients with materially different
-chart profiles (a thin-documentation case with 2 explicit "no relevant
-documentation found" categories, and a data-rich oncology case) — both
-produced grounded drafts with correctly surfaced gaps and correct,
+chart profiles (a thin-documentation case and a data-rich oncology case)
+— both produced grounded drafts with appropriate review notes and correct,
 non-arbitrary critique verdicts.
 
 ## Agent Workflow — Risk Model Integration & Dynamic Retrieval
@@ -370,6 +372,55 @@ is logged (name, arguments, result) and returned alongside the answer.
   medication list that contradicts the same note's "No Active
   Medications" line) without being specifically prompted to
 
+## Production Hardening and Clinician Web App
+
+**Status: First production-readiness pass complete for the local MVP.**
+
+This pass focused on making the demo safer to run, easier to debug, and more
+usable through the browser without changing the underlying model. It does not
+make the system clinically production-ready, but it closes several operational
+gaps that were previously obvious in local testing.
+
+### API safeguards (`src/api/main.py`, `src/api/production.py`)
+- Added centralized safe handling for unexpected API exceptions. Users now get a
+  controlled error message while the server logs the traceback.
+- Added dependency-aware `/health` output so setup problems such as missing
+  processed data, vector store, production run id, or Groq key are visible.
+- Added optional demo-token protection through `DEMO_API_KEY`.
+- Added file-based audit logging to `results/audit_log.jsonl`.
+- Added file-based saved care plans to `results/care_plans.jsonl`.
+- Added `GET /care-plans` to inspect saved generated plans.
+
+### Runtime controls (`src/utils/runtime.py`, agent modules)
+- Added configurable timeouts for Groq calls via `LLM_TIMEOUT_SECONDS`.
+- Added configurable timeout handling for the internal risk API call via
+  `RISK_API_TIMEOUT_SECONDS`.
+- Updated risk-tool failures so API connection and timeout failures produce
+  actionable messages rather than low-level request errors.
+
+### React clinician UI (`web/`)
+- Enabled the previously disabled **Patients** and **Care plans** sections.
+- Added a Patients table backed by the existing `/patients` API.
+- Added a Care plans page that selects a patient and generates/views the draft
+  follow-up plan.
+- Added frontend request timeout handling via `VITE_REQUEST_TIMEOUT_MS` and
+  optional demo-token header support via `VITE_DEMO_API_KEY`.
+- Added reusable loading/error/empty states for web pages.
+- Removed Synthea's numeric suffixes from patient names in display only.
+- Removed the dashboard fairness banner from the main workflow while preserving
+  fairness caveats in API/model documentation.
+
+### Evidence and answer presentation
+- Chat answers now render as formatted notes instead of raw markdown-looking
+  text.
+- Dashboard patient evidence now shows concise evidence cards and a collapsible
+  "View chart excerpts used by the agent" panel with the actual cited chart
+  snippets.
+- Not-found-only retrieval sections are hidden from the chart-excerpt panel.
+- The plan's third section is now branded as **Additional review notes** rather
+  than "Documentation gaps" or "Chart information not found."
+- Raw "no relevant documentation found" lines are suppressed in the UI.
+
 ## Next steps
 
 1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
@@ -385,7 +436,13 @@ is logged (name, arguments, result) and returned alongside the answer.
    section above.
 7. Address the reasoning/critique model independence gap — still open
    (both currently OpenAI open-weight models, different sizes only).
-8. **Next up:** Clinician Web App (React UI — risk queue dashboard,
-   patient detail/plan review) per the original architecture.
-9. Once the functional pieces above are stable, apply production-grade
-   architecture and tech-stack hardening (spec to be provided).
+8. ~~Clinician Web App (React UI — risk queue dashboard, patient list,
+   care-plan view, chat)~~ — **First pass done.**
+9. ~~Apply first production-grade hardening pass~~ — **Done.** Added safe API
+   errors, health dependency checks, request timeouts, optional demo-token
+   protection, audit logging, and saved care-plan records.
+10. Next up: wire clinician approve/edit/reject actions to real backend state.
+11. Next up: replace file-based audit/care-plan persistence with managed
+   database tables.
+12. Next up: add true authentication/RBAC and FHIR write-back/notification
+   stubs.

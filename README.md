@@ -50,9 +50,10 @@ codebase has implemented the local synthetic-data, ingestion, feature,
 target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
 section-aware note chunking, vector-store indexing, risk-model API,
 risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
-critique agent, risk-gated LangGraph orchestration, and free-form
-tool-calling chat agent pieces first. Persistence services and the clinician UI
-are still planned work.
+critique agent, risk-gated LangGraph orchestration, free-form tool-calling chat
+agent, a React clinician UI, file-based audit logging, and saved draft care-plan
+persistence. Full EHR write-back, production identity/RBAC, and managed
+platform services are still planned work.
 
 ```mermaid
 flowchart TB
@@ -145,11 +146,15 @@ flowchart TB
   patient-scoped retrieval, Groq-hosted care-plan drafting, and a second-model
   critique step for medium/high-risk patients. The pipeline keeps missing
   documentation explicit instead of smoothing over gaps.
-- **Planned review and action** - a clinician-facing app will keep AI output in
-  draft state until approval, then write the plan back through FHIR and send
-  follow-up notifications.
-- **Planned platform services** - OAuth2/RBAC, full audit logging, CI/CD,
-  production monitoring, retries, and circuit breakers support the workflow.
+- **Implemented review surface** - the React web app now includes a risk queue,
+  Patients view, Care plans view, and ad hoc chat interface. Draft plans remain
+  visibly pending clinician action.
+- **Implemented production safeguards** - the API has safe error handling,
+  health dependency reporting, optional demo-token protection, request timeouts,
+  file-based audit logging, and saved draft care-plan records.
+- **Planned platform services** - OAuth2/RBAC, managed database persistence,
+  CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
+  notification delivery remain future hardening work.
 
 ## Application scope
 
@@ -224,10 +229,10 @@ The current repository shows the first stage of the MVP working locally:
   fixed categories if an API key is missing or generation fails.
 - Added `src.agents.reasoning_agent`, which uses Groq
   `openai/gpt-oss-120b` by default to draft a grounded three-section care plan:
-  risk factors, recommended follow-up actions, and documentation gaps.
+  risk factors, recommended follow-up actions, and additional review notes.
 - Added `src.agents.critique_agent`, which uses Groq `openai/gpt-oss-20b` by
   default to review the draft for hallucination, clinical overreach, and missed
-  documentation gaps before clinician review. The critique input now receives
+  reviewer-facing caveats before clinician review. The critique input now receives
   the same risk-assessment context as the reasoning agent so valid model risk
   percentiles are not flagged as unsupported chart claims.
 - Added `src.agents.risk_tool`, which looks up the patient's latest model
@@ -243,6 +248,21 @@ The current repository shows the first stage of the MVP working locally:
   answer as an audit trail, and chart-search tool guidance now steers the model
   toward validated clinical query phrasings instead of vague searches such as
   "discharge summary."
+- Added production-readiness helpers around the API: safe unhandled-error
+  responses, optional `DEMO_API_KEY` protection, `/health` dependency checks,
+  configurable LLM/risk-API timeouts, file-based audit logging in
+  `results/audit_log.jsonl`, and saved generated care plans in
+  `results/care_plans.jsonl`.
+- Added the first React clinician workflow beyond the risk queue:
+  `/patients` lists recent discharged patients, `/care-plans` lets a user select
+  a patient and generate/view a draft follow-up plan, and `/chat` renders
+  assistant answers as formatted notes with visible tool-call audit trails.
+- Updated the dashboard evidence panel to show concise patient evidence cards
+  plus a collapsible "chart excerpts used by the agent" section. Name suffix
+  digits from synthetic Synthea patients are removed in display only.
+- Rebranded the care-plan third section from "Documentation gaps" to
+  "Additional review notes" and suppressed raw "no relevant documentation
+  found" lines in the UI.
 
 Committed processed data currently includes:
 
@@ -290,31 +310,47 @@ Latest agent-orchestration summary:
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
+| Production guardrails | Safe API error handling, dependency-aware `/health`, optional demo token, request timeouts, audit JSONL, and saved care-plan JSONL |
+| React clinician UI | Risk queue, Patients, Care plans, and Ask a question routes with formatted markdown responses and cited chart excerpts |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
 
 ![Clinician review concept](Docs/readme_clinician_review.svg)
 
+Implemented locally in `web/`:
+
+- **Risk queue** - shows recent discharged patients, risk percentile, admission
+  reason, and generated patient evidence.
+- **Patient evidence** - summarizes cited chart context and can expand into the
+  chart excerpts used by the agent.
+- **Draft follow-up plan** - renders the generated plan, critique status, and
+  clinician action placeholders.
+- **Patients** - lists recent patients from the API with cleaned display names.
+- **Care plans** - selects a patient and generates/views their draft plan.
+- **Ask a question** - supports free-form patient questions with visible tool
+  calls and formatted assistant answers.
+
 Design principles from the proposal:
 
 - AI-generated care plans are always visibly drafts until a clinician acts.
 - Every risk score and retrieved chart fact should be traceable to its source.
-- Fairness alerts belong on the main dashboard, not buried in settings.
+- Fairness status remains an API/model caveat, but the dashboard no longer shows
+  a dedicated fairness banner in the main workflow.
 
 ## Status
 
 MVP in progress. The local data, modeling, retrieval foundation, agent pipeline,
-and first serving layer are now implemented: FHIR ingestion, hospitalization
-episode construction, feature export, 30-day target labeling, baseline Cox
-survival modeling, patient-grouped cross-validation for comparing Cox, Random
-Survival Forest, and Gradient Boosting survival candidates, experiment
-logging/model saving, fairness-audit infrastructure, section-aware note
-chunking, ChromaDB vector-store indexing, FastAPI model serving, patient-scoped
-retrieval, risk-model-to-agent integration, dynamic retrieval categories,
-grounded care-plan drafting, second-model critique, and risk-gated LangGraph
-orchestration, plus an auditable tool-calling chat agent for free-form patient
-questions.
+serving layer, and first clinician-facing web workflow are now implemented: FHIR
+ingestion, hospitalization episode construction, feature export, 30-day target
+labeling, baseline Cox survival modeling, patient-grouped cross-validation for
+comparing Cox, Random Survival Forest, and Gradient Boosting survival candidates,
+experiment logging/model saving, fairness-audit infrastructure, section-aware
+note chunking, ChromaDB vector-store indexing, FastAPI model serving,
+patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
+categories, grounded care-plan drafting, second-model critique, risk-gated
+LangGraph orchestration, an auditable tool-calling chat agent, and a React UI
+with risk queue, Patients, Care plans, and Ask a question routes.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -325,8 +361,10 @@ enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
 audit, calibrating retrieval distance thresholds against labeled relevance
-examples, strengthening reasoning/critique model independence, adding
-persistence/audit services, and building the clinician-facing review workflow.
+examples, strengthening reasoning/critique model independence, replacing
+file-based persistence with managed storage, adding true auth/RBAC, wiring
+clinician approve/edit/reject actions, and adding FHIR write-back/notification
+stubs.
 
 ## Getting started
 
@@ -402,6 +440,20 @@ python -m src.agents.orchestrator <patient_id>
 python -m src.agents.chat_agent "For patient <patient_id>, should we be worried about readmission risk and why?"
 ```
 
+To run the React web app:
+
+```bash
+cd web
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+Then open `http://127.0.0.1:5173/`. The web app expects the FastAPI service on
+`http://localhost:8080` by default. Optional production-hardening environment
+variables include `DEMO_API_KEY` on the API side and `VITE_DEMO_API_KEY` on the
+web side, plus `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`, and
+`VITE_REQUEST_TIMEOUT_MS`.
+
 ### API smoke tests
 
 After starting the API with `uvicorn src.api.main:app --reload --port 8080`,
@@ -453,6 +505,8 @@ curl -X POST http://127.0.0.1:8080/predict \
   }'
 
 curl http://127.0.0.1:8080/drift-report
+
+curl http://127.0.0.1:8080/care-plans
 ```
 
 `/predict` returns a relative Cox risk score, percentile, and low/medium/high
@@ -498,13 +552,18 @@ analysis scripts above and manual inspection of sample inpatient bundles.
 ```text
 src/
 |-- agents/       # Risk tool, retrieval, reasoning, critique, chat, and orchestration
-|-- api/          # FastAPI model serving, dynamic request schema, drift report
+|-- api/          # FastAPI model serving, dynamic schema, drift, audit/care-plan persistence
 |-- embeddings/   # Section-aware note chunking and Chroma vector-store build
 |-- retrieval/    # Patient-scoped Chroma queries with relevance thresholding
 |-- ingestion/    # FHIR parsing, temporal filters, episode clustering
 |-- features/     # 30-day target construction
 |-- model/        # Cox baseline, experiment registry, fairness/model comparison
-`-- utils/        # Config and logging helpers
+`-- utils/        # Config, logging, and runtime timeout helpers
+
+web/
+|-- src/components/ # Dashboard, chat, patients, care plans, shared states
+|-- src/api.js      # Browser API client with timeout/demo-token support
+`-- src/*.js        # Display helpers for names, care-plan text, markdown
 
 scripts/
 |-- export_records.py              # Structured CSV + notes JSONL export
@@ -549,9 +608,9 @@ or data use agreement is required to run or demo it. See
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
-| Implemented API | FastAPI, Uvicorn, Pydantic |
+| Implemented API | FastAPI, Uvicorn, Pydantic, file-based audit/care-plan logs |
+| Implemented frontend | React, Vite, React Router |
 | Planned data services | Postgres, Redis, Kafka |
-| Planned frontend | React or Streamlit for MVP |
 | Planned notifications | Twilio or patient portal stub |
 
 ## Success criteria
