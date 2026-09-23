@@ -257,9 +257,17 @@ The current repository shows the first stage of the MVP working locally:
   `/patients` lists recent discharged patients, `/care-plans` lets a user select
   a patient and generate/view a draft follow-up plan, and `/chat` renders
   assistant answers as formatted notes with visible tool-call audit trails.
-- Updated the dashboard evidence panel to show concise patient evidence cards
-  plus a collapsible "chart excerpts used by the agent" section. Name suffix
-  digits from synthetic Synthea patients are removed in display only.
+- Updated the dashboard evidence panel to show cited chart excerpts directly in
+  the Patient evidence panel, grouped by retrieval category and source. The
+  display layer strips repeated headers, deduplicates repeated clinical items,
+  preserves hyphenated clinical terms such as lab names, and separates
+  procedures, lab reports, medications, and care-plan entries into readable
+  sub-blocks.
+- Validated the Patient evidence formatter against live `/patients/{id}/assessment`
+  responses and exact real discharge-note excerpts from
+  `data/processed/discharge_notes.jsonl`; see `results/RESULTS.md` for the
+  before/after details.
+- Name suffix digits from synthetic Synthea patients are removed in display only.
 - Rebranded the care-plan third section from "Documentation gaps" to
   "Additional review notes" and suppressed raw "no relevant documentation
   found" lines in the UI.
@@ -311,7 +319,7 @@ Latest agent-orchestration summary:
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
 | Production guardrails | Safe API error handling, dependency-aware `/health`, optional demo token, request timeouts, audit JSONL, and saved care-plan JSONL |
-| React clinician UI | Risk queue, Patients, Care plans, and Ask a question routes with formatted markdown responses and cited chart excerpts |
+| React clinician UI | Risk queue, Patients, Care plans, and Ask a question routes with formatted markdown responses and deduplicated cited chart excerpts |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -322,8 +330,9 @@ Implemented locally in `web/`:
 
 - **Risk queue** - shows recent discharged patients, risk percentile, admission
   reason, and generated patient evidence.
-- **Patient evidence** - summarizes cited chart context and can expand into the
-  chart excerpts used by the agent.
+- **Patient evidence** - shows cited chart context used by the agent, with
+  repeated headers removed, duplicate clinical bullets collapsed, and procedures,
+  labs, medications, and care-plan items formatted under clear subheaders.
 - **Draft follow-up plan** - renders the generated plan, critique status, and
   clinician action placeholders.
 - **Patients** - lists recent patients from the API with cleaned display names.
@@ -452,7 +461,9 @@ Then open `http://127.0.0.1:5173/`. The web app expects the FastAPI service on
 `http://localhost:8080` by default. Optional production-hardening environment
 variables include `DEMO_API_KEY` on the API side and `VITE_DEMO_API_KEY` on the
 web side, plus `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`, and
-`VITE_REQUEST_TIMEOUT_MS`.
+`VITE_REQUEST_TIMEOUT_MS`. Assessment requests can use a longer frontend timeout
+through `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval and care-plan drafting can
+take longer than ordinary API reads.
 
 ### API smoke tests
 

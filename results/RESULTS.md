@@ -413,13 +413,47 @@ gaps that were previously obvious in local testing.
 ### Evidence and answer presentation
 - Chat answers now render as formatted notes instead of raw markdown-looking
   text.
-- Dashboard patient evidence now shows concise evidence cards and a collapsible
-  "View chart excerpts used by the agent" panel with the actual cited chart
-  snippets.
+- Dashboard patient evidence now shows the actual cited chart snippets used by
+  the agent, grouped by retrieval category and source.
 - Not-found-only retrieval sections are hidden from the chart-excerpt panel.
 - The plan's third section is now branded as **Additional review notes** rather
   than "Documentation gaps" or "Chart information not found."
 - Raw "no relevant documentation found" lines are suppressed in the UI.
+
+## Latest UI Validation - Patient Evidence Panel
+
+**Status: Fixed and validated against real project data.**
+
+The patient-evidence panel had four concrete display defects in production
+output: duplicated section headers, repeated clinical line items, incorrectly
+split hyphenated clinical terms, and run-on text where unrelated retrieved
+content was concatenated without a separator. The fix was kept in the React
+display layer (`web/src/components/Dashboard.jsx`) so retrieval behavior remains
+unchanged and auditable.
+
+### What was fixed
+
+| Defect | Fix |
+|---|---|
+| Category header repeated inside its own body | Strip body lines that match the rendered section header before display |
+| Clinical bullets treated as new cited excerpts | Only `- [Source] ...` starts a new retrieved excerpt; inner `- item` bullets stay inside that excerpt |
+| Consecutive duplicate procedures, labs, and medications | Deduplicate rendered items within each evidence block |
+| Terms such as `basic metabolic 2000 panel - serum or plasma` split into separate bullets | Stop treating every spaced hyphen as a list boundary; preserve hyphenated clinical terms |
+| Plan, lab, medication, and care-plan content running together | Split retrieved content into labeled sub-blocks: Procedures, Lab Reports, Medications, Care Plan |
+
+### Real-data validation
+
+Validated with live `/patients/{id}/assessment` responses from the local API and
+with exact real discharge-note excerpts from `data/processed/discharge_notes.jsonl`.
+
+| Validation case | Result |
+|---|---|
+| Live assessment with Plan-section procedure bullets | Plan bullets now remain under `SOURCE: Plan` instead of being misclassified as separate source rows |
+| Live assessment with repeated Social History excerpts across generated categories | Repeated excerpts collapse to one displayed block |
+| Live assessment with both procedure and care-plan content | Procedures and care-plan entries render under separate subheaders |
+| Discharge-note excerpt with repeated labs/medications and a hyphenated lab term | Repeated labs/medications collapse, while `basic metabolic 2000 panel - serum or plasma` remains one bullet |
+
+Confirmed build: `npm.cmd run build`.
 
 ## Next steps
 
@@ -441,8 +475,11 @@ gaps that were previously obvious in local testing.
 9. ~~Apply first production-grade hardening pass~~ — **Done.** Added safe API
    errors, health dependency checks, request timeouts, optional demo-token
    protection, audit logging, and saved care-plan records.
-10. Next up: wire clinician approve/edit/reject actions to real backend state.
-11. Next up: replace file-based audit/care-plan persistence with managed
+10. ~~Fix cited-context display formatting and deduplication in the dashboard~~
+   — **Done.** Validated against live assessment payloads and real discharge-note
+   excerpts.
+11. Next up: wire clinician approve/edit/reject actions to real backend state.
+12. Next up: replace file-based audit/care-plan persistence with managed
    database tables.
-12. Next up: add true authentication/RBAC and FHIR write-back/notification
+13. Next up: add true authentication/RBAC and FHIR write-back/notification
    stubs.
