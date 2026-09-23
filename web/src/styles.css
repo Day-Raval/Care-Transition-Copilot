@@ -150,14 +150,6 @@ body {
 .pill-ok { background: var(--ok-bg); color: var(--ok); }
 .pill-warn { background: var(--danger-bg); color: var(--danger); }
 
-.evidence-list { display: flex; flex-direction: column; gap: 10px; }
-.evidence-card {
-  border: 1px solid var(--ok-bg);
-  background: var(--ok-bg);
-  border-radius: 8px;
-  padding: 10px 14px;
-}
-.evidence-text { font-weight: 600; font-size: 13px; }
 .evidence-source { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .cited-context { margin-top: 12px; }
 .cited-context-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
@@ -179,6 +171,18 @@ body {
   padding: 6px 0;
   border-top: 1px solid var(--border);
 }
+.evidence-text-section { margin-bottom: 8px; }
+.evidence-text-section:last-child { margin-bottom: 0; }
+.evidence-subhead {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 3px;
+}
+.evidence-text-section p { margin: 0 0 4px 0; }
+.evidence-text-section ul { margin: 0; padding-left: 16px; }
+.evidence-text-section li { margin-bottom: 3px; }
+.evidence-text-section li:last-child { margin-bottom: 0; }
 .cited-context-item:first-of-type { border-top: 0; padding-top: 0; }
 .cited-context-missing {
   font-size: 12px;

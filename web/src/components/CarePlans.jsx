@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAssessment, getQueue } from "../api.js";
-import { displayCarePlanText } from "../carePlanText.js";
+import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
@@ -12,13 +12,11 @@ export default function CarePlans() {
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [error, setError] = useState(null);
+  const isLowRisk = assessment?.risk_category === "low";
 
   useEffect(() => {
     getQueue(null, 50)
-      .then((items) => {
-        setPatients(items);
-        if (items.length > 0) selectPatient(items[0]);
-      })
+      .then(setPatients)
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPatients(false));
   }, []);
@@ -72,16 +70,23 @@ export default function CarePlans() {
 
         {loadingPlan && <LoadingState>Drafting plan...</LoadingState>}
         <ErrorState message={error} />
+        {!selected && !loadingPlan && (
+          <EmptyState>Select a patient to generate a draft follow-up plan.</EmptyState>
+        )}
 
         {assessment && !loadingPlan && (
           <>
             <div className="pill-row">
               <span className="pill pill-neutral">{assessment.risk_category} risk</span>
-              <span className="pill pill-neutral">{assessment.risk_percentile.toFixed(1)} percentile</span>
+              {!isLowRisk && (
+                <span className="pill pill-neutral">{assessment.risk_percentile.toFixed(1)} percentile</span>
+              )}
             </div>
             <div
               className="plan-rendered"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(displayCarePlanText(assessment.draft_plan)) }}
+              dangerouslySetInnerHTML={{
+                __html: renderMarkdown(isLowRisk ? LOW_RISK_PLAN_MESSAGE : displayCarePlanText(assessment.draft_plan)),
+              }}
             />
           </>
         )}

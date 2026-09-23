@@ -1,3 +1,6 @@
+export const LOW_RISK_PLAN_MESSAGE =
+  "Low readmission risk. Full chart review and AI care-plan drafting were not triggered for this patient. Continue standard discharge instructions, medication reconciliation, and routine follow-up per the care team's protocol.";
+
 export function displayCarePlanText(text) {
   return String(text || "")
     .replace(/DOCUMENTATION GAPS/gi, "ADDITIONAL REVIEW NOTES")

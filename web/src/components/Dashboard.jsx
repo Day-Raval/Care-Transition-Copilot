@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getQueue, getAssessment } from "../api.js";
-import { displayCarePlanText } from "../carePlanText.js";
+import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
 
@@ -16,25 +16,261 @@ function tooSimilar(a, b, threshold = 0.7) {
   return jaccardSimilarity(a, b) > threshold;
 }
 
+function trimRepeatedSource(source, text) {
+  const prefix = `${source}:`;
+  return text.toLowerCase().startsWith(prefix.toLowerCase())
+    ? text.slice(prefix.length).trim().replace(/\s+/g, " ")
+    : text.trim();
+}
+
+function normalizeEvidenceText(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function appendEvidenceLine(existing, line) {
+  return [existing, line.replace(/^-\s+/, "").trim()].filter(Boolean).join("\n");
+}
+
+function dedupeConsecutiveLines(text) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines
+    .filter((line, index) => normalizeEvidenceText(line) !== normalizeEvidenceText(lines[index - 1] || ""))
+    .join("\n");
+}
+
+function stripRepeatedHeader(text, header) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return "";
+
+  const firstLineKey = normalizeEvidenceText(lines[0]);
+  const headerKey = normalizeEvidenceText(header);
+  if (firstLineKey === headerKey || tooSimilar(lines[0], header, 0.9)) {
+    return lines.slice(1).join("\n");
+  }
+  return lines.join("\n");
+}
+
+function parseEvidenceLine(line, fallbackSource) {
+  const match = line.match(/^-\s+\[([^,\]]+)(?:,[^\]]*)?\]\s*(.*)$/);
+  const source = match ? match[1] : fallbackSource;
+  const text = trimRepeatedSource(source, match ? match[2] : line.replace(/^-\s+/, ""));
+  return { source, text };
+}
+
 function parseEvidenceSections(summary) {
   if (!summary) return [];
-  return summary
-    .split(/\n## /)
-    .slice(1)
-    .map((block) => {
-      const lines = block.trim().split("\n").filter(Boolean);
-      const title = lines[0]?.replace(/^##\s*/, "").trim();
-      const excerpts = lines
-        .filter((line) => line.startsWith("-"))
-        .map((line) => {
-          const match = line.match(/^-\s+\[([^,\]]+)(?:,[^\]]*)?\]\s*(.*)$/);
-          return match
-            ? { source: match[1], text: match[2] }
-            : { source: title, text: line.replace(/^-\s+/, "") };
-        });
-      return { title, excerpts };
+  const sections = [];
+  let current = null;
+  let lastExcerpt = null;
+
+  summary.split("\n").forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    if (trimmed.startsWith("## ")) {
+      current = { title: trimmed.replace(/^##\s*/, ""), excerpts: [] };
+      sections.push(current);
+      lastExcerpt = null;
+      return;
+    }
+
+    if (!current) return;
+
+    if (trimmed.startsWith("-") && !trimmed.startsWith("- [") && lastExcerpt) {
+      lastExcerpt.text = appendEvidenceLine(lastExcerpt.text, trimmed);
+      return;
+    }
+
+    if (!trimmed.startsWith("-")) {
+      if (lastExcerpt && !trimmed.startsWith("(")) {
+        lastExcerpt.text = appendEvidenceLine(lastExcerpt.text, trimmed);
+      }
+      return;
+    }
+
+    const { source, text } = parseEvidenceLine(trimmed, current.title);
+    lastExcerpt = { source, text };
+    current.excerpts.push(lastExcerpt);
+  });
+
+  const populatedSections = sections
+    .map((section) => {
+      const seen = [];
+      return {
+        ...section,
+        excerpts: section.excerpts.filter((excerpt) => {
+          excerpt.text = dedupeConsecutiveLines(excerpt.text);
+          const key = normalizeEvidenceText(excerpt.text);
+          if (!key || seen.some((item) => tooSimilar(item, excerpt.text))) return false;
+          seen.push(excerpt.text);
+          return true;
+        }),
+      };
     })
     .filter((section) => section.title && section.excerpts.length > 0);
+  if (populatedSections.length > 0) return populatedSections;
+
+  const fallbackExcerpts = summary
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("-"))
+    .map((line) => parseEvidenceLine(line, "Chart excerpt"))
+    .filter((excerpt, i, all) => (
+      !all.slice(0, i).some((seen) => tooSimilar(seen.text, excerpt.text))
+    ));
+
+  return fallbackExcerpts.length > 0
+    ? [{ title: "Chart excerpts returned by the agent", excerpts: fallbackExcerpts }]
+    : [];
+}
+
+function cleanEvidenceItem(item) {
+  return item
+    .replace(/^The following\b[^:]*:\s*/i, "")
+    .replace(/^The patient was prescribed the following medications:\s*/i, "")
+    .replace(/^The patient was placed on a careplan:\s*/i, "")
+    .replace(/^Allergies:\s*No Known Allergies\.?\.?\s*/i, "")
+    .replace(/^[-:]\s*/, "")
+    .trim();
+}
+
+function splitEvidenceItems(text) {
+  return text
+    .replace(/\)\s+-\s+/g, ")\n")
+    .split(/\n|\s*;\s*|\s+\/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function uniqueItems(items, externalSeen = null) {
+  const cleaned = items.map(cleanEvidenceItem).filter(Boolean);
+  const seen = externalSeen || [];
+  return cleaned.filter((item, index) => {
+    const key = normalizeEvidenceText(item);
+    const hasMoreSpecificDuplicate = cleaned.some((other, otherIndex) => {
+      const otherKey = normalizeEvidenceText(other);
+      return otherIndex !== index && otherKey.length > key.length && otherKey.includes(key);
+    });
+    if (!key || hasMoreSpecificDuplicate || seen.some((seenKey) => seenKey === key || seenKey.includes(key) || key.includes(seenKey))) {
+      return false;
+    }
+    seen.push(key);
+    return true;
+  });
+}
+
+function evidenceGroupLabel(chunk) {
+  if (/^The patient was prescribed\b/i.test(chunk)) return "Medications";
+  if (/^The patient was placed on a careplan\b/i.test(chunk)) return "Care Plan";
+  const match = chunk.match(/^The following\s+(.+?)\s+(?:were|was)\s+/i);
+  if (match) {
+    return match[1]
+      .replace(/\bcompleted\b/i, "")
+      .replace(/\bconducted\b/i, "")
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+  if (/^The following medications\b/i.test(chunk)) return "Medications";
+  return "";
+}
+
+function formatEvidenceText(text, seenItems = null) {
+  const chunks = text
+    .replace(/\s+The following\b/g, "\nThe following")
+    .replace(/\s+The patient was prescribed\b/g, "\nThe patient was prescribed")
+    .replace(/\s+The patient was placed on a careplan\b/g, "\nThe patient was placed on a careplan")
+    .split("\n")
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  const blocks = [];
+  let activeListBlock = null;
+
+  chunks.forEach((chunk) => {
+    const label = evidenceGroupLabel(chunk);
+    const body = cleanEvidenceItem(chunk);
+    const splitParts = splitEvidenceItems(body);
+    const isDelimitedList = splitParts.length > 1;
+    const parts = uniqueItems(splitParts, seenItems);
+
+    if (label) {
+      activeListBlock = { label, intro: "", items: parts };
+      blocks.push(activeListBlock);
+      return;
+    }
+
+    if (activeListBlock) {
+      if (parts.length > 0) activeListBlock.items.push(...parts);
+      return;
+    }
+
+    activeListBlock = null;
+    if (isDelimitedList && parts.length > 1) {
+      blocks.push({ label: "", intro: "", items: parts });
+      return;
+    }
+    blocks.push(parts.length > 1
+      ? { label: "", intro: parts[0], items: parts.slice(1) }
+      : { label: "", intro: body, items: [] });
+  });
+
+  return blocks;
+}
+
+function noEvidenceMessage(assessment) {
+  const missing = assessment?.categories_with_no_match || [];
+  if (missing.length === 0) return "No cited chart excerpts returned for this patient.";
+  return `No cited chart excerpts matched: ${missing.join("; ")}.`;
+}
+
+function hasEvidenceBlock(block) {
+  return block.label || block.intro || block.items.length > 0;
+}
+
+function mergeEvidenceBlocks(blocks) {
+  return blocks.reduce((merged, block) => {
+    const existing = block.label && !block.intro
+      ? merged.find((item) => item.label === block.label && !item.intro)
+      : null;
+    if (existing) {
+      existing.items = uniqueItems([...existing.items, ...block.items]);
+      return merged;
+    }
+    merged.push(block);
+    return merged;
+  }, []);
+}
+
+function buildEvidenceDisplaySections(summary) {
+  const displaySections = [];
+  const seenExcerpts = [];
+
+  parseEvidenceSections(summary).forEach((section) => {
+    let displaySection = displaySections.find((existing) => tooSimilar(existing.title, section.title, 0.85));
+    if (!displaySection) {
+      displaySection = { title: section.title, rows: [], seenItems: [] };
+      displaySections.push(displaySection);
+    }
+
+    const rowsBySource = new Map(displaySection.rows.map((row) => [row.source, row]));
+    section.excerpts.forEach((excerpt) => {
+      const text = stripRepeatedHeader(excerpt.text, section.title);
+      if (seenExcerpts.some((seen) => tooSimilar(seen, text, 0.9))) return;
+      seenExcerpts.push(text);
+
+      const blocks = formatEvidenceText(text, displaySection.seenItems).filter(hasEvidenceBlock);
+      if (blocks.length === 0) return;
+
+      const row = rowsBySource.get(excerpt.source) || { source: excerpt.source, blocks: [] };
+      row.blocks = mergeEvidenceBlocks([...row.blocks, ...blocks]);
+      rowsBySource.set(excerpt.source, row);
+      displaySection.rows = Array.from(rowsBySource.values());
+    });
+  });
+
+  return displaySections
+    .map(({ seenItems, ...section }) => section)
+    .filter((section) => section.rows.length > 0);
 }
 
 export default function Dashboard() {
@@ -47,10 +283,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     getQueue(null, 20)
-      .then((items) => {
-        setQueue(items);
-        if (items.length > 0) selectPatient(items[0]);
-      })
+      .then(setQueue)
       .catch((e) => setError(e.message))
       .finally(() => setLoadingQueue(false));
   }, []);
@@ -69,19 +302,7 @@ export default function Dashboard() {
   const isLowRisk = assessment?.risk_category === "low";
   const critiqueFlagged = assessment?.critique_notes?.toUpperCase().includes("FLAGGED");
 
-  const evidenceSections = parseEvidenceSections(assessment?.patient_context_summary);
-  let evidenceCards = [];
-  if (assessment && !isLowRisk) {
-    const seen = [];
-    evidenceSections.forEach((section) => {
-      const firstFinding = section.excerpts[0];
-      if (!firstFinding) return;
-      const fullText = firstFinding.text;
-      if (seen.some((s) => tooSimilar(s, fullText))) return;
-      seen.push(fullText);
-      evidenceCards.push({ text: fullText.slice(0, 90), source: section.title });
-    });
-  }
+  const evidenceSections = buildEvidenceDisplaySections(assessment?.patient_context_summary);
 
   return (
     <div>
@@ -121,6 +342,7 @@ export default function Dashboard() {
 
           {loadingAssessment && <p className="muted">Loading evidence…</p>}
           {error && <p className="error-message" style={{ padding: 0 }}>{error}</p>}
+          {!selected && !loadingAssessment && <p className="muted">Select a patient to load evidence.</p>}
 
           {assessment && !loadingAssessment && (
             <>
@@ -133,32 +355,43 @@ export default function Dashboard() {
                 <p className="muted">Low risk — full chart review was skipped.</p>
               ) : (
                 <>
-                  <div className="evidence-list">
-                    {evidenceCards.map((card, i) => (
-                      <div className="evidence-card" key={i}>
-                        <div className="evidence-text">{card.text}...</div>
-                        <div className="evidence-source">topic: {card.source}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {evidenceSections.length > 0 && (
-                    <details className="cited-context">
-                      <summary>View chart excerpts used by the agent</summary>
+                  {evidenceSections.length > 0 ? (
+                    <div className="cited-context">
+                      <div className="cited-context-title">Chart excerpts used by the agent</div>
                       <div className="cited-context-list">
-                        {evidenceSections.map((section) => (
-                          <div className="cited-context-section" key={section.title}>
-                            <div className="cited-context-title">{section.title}</div>
-                            {section.excerpts.map((excerpt, i) => (
-                              <div className="cited-context-item" key={i}>
-                                <div>{excerpt.text}</div>
-                                <div className="evidence-source">source: {excerpt.source}</div>
-                              </div>
-                            ))}
-                          </div>
-                        ))}
+                        {evidenceSections.map((section) => {
+                          return (
+                            <div className="cited-context-section" key={section.title}>
+                              <div className="cited-context-title">{section.title}</div>
+                              {section.rows.map((row, i) => (
+                                <div className="cited-context-item" key={i}>
+                                  <div className="evidence-subhead">{row.source}</div>
+                                  <div className="evidence-text-block">
+                                    {row.blocks.map((block, j) => (
+                                      <div className="evidence-text-section" key={j}>
+                                        {block.label && block.label !== row.source && (
+                                          <div className="evidence-subhead">{block.label}</div>
+                                        )}
+                                        {block.intro && <p>{block.intro}</p>}
+                                        {block.items.length > 0 && (
+                                          <ul>
+                                            {block.items.map((item, k) => (
+                                              <li key={k}>{item}</li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </div>
-                    </details>
+                    </div>
+                  ) : (
+                    <div className="cited-context-missing">{noEvidenceMessage(assessment)}</div>
                   )}
                 </>
               )}
@@ -174,11 +407,14 @@ export default function Dashboard() {
           </p>
 
           {loadingAssessment && <p className="muted">Drafting plan…</p>}
+          {!selected && !loadingAssessment && (
+            <p className="muted">Select a patient to draft a follow-up plan.</p>
+          )}
 
           {assessment && !loadingAssessment && (
             <>
               {isLowRisk ? (
-                <p>{assessment.draft_plan}</p>
+                <p>{LOW_RISK_PLAN_MESSAGE}</p>
               ) : (
                 <>
                   <div className="checklist-label">Independent review</div>

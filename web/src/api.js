@@ -1,19 +1,21 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
+const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const DEMO_API_KEY = import.meta.env.VITE_DEMO_API_KEY || "";
 
 async function request(path, options = {}) {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const headers = {
     "Content-Type": "application/json",
     ...(DEMO_API_KEY ? { "x-demo-token": DEMO_API_KEY } : {}),
-    ...(options.headers || {}),
+    ...(fetchOptions.headers || {}),
   };
 
   try {
     const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
       headers,
       signal: controller.signal,
     });
@@ -39,7 +41,7 @@ export function getQueue(category = null, limit = 50) {
 }
 
 export function getAssessment(patientId) {
-  return request(`/patients/${patientId}/assessment`);
+  return request(`/patients/${patientId}/assessment`, { timeoutMs: ASSESSMENT_TIMEOUT_MS });
 }
 
 export function getSavedCarePlans(limit = 50) {
