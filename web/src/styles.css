@@ -211,15 +211,25 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
   border-radius: 8px;
   border: 1px solid var(--border);
   background: white;
-  cursor: not-allowed;
+  cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  opacity: 0.75;
 }
+.btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .btn.approve { background: var(--ok); color: white; border-color: var(--ok); }
 .btn.edit { border-color: var(--teal); color: var(--teal); }
 .btn.reject { border-color: var(--danger); color: var(--danger); }
 .btn-note { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.decision-badge {
+  margin-top: 16px;
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.decision-badge.approved { background: var(--ok-bg); color: var(--ok); }
+.decision-badge.rejected { background: var(--danger-bg); color: var(--danger); }
 
 /* Fairness banner */
 .fairness-banner {

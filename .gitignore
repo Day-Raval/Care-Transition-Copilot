@@ -45,3 +45,6 @@ yarn-error.log*
 
 # Results
 results/*.jsonl
+
+# SQLite runtime databases
+*.sqlite3

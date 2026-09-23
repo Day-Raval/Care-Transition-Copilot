@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from src.utils.config import Config
 RESULTS_DIR = Path("results")
 AUDIT_LOG_PATH = RESULTS_DIR / "audit_log.jsonl"
 CARE_PLANS_PATH = RESULTS_DIR / "care_plans.jsonl"
+DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
 CHROMA_PATH = "data/processed/chroma_db"
 
 
@@ -58,6 +60,70 @@ def log_audit_event(event_type: str, **payload: Any) -> None:
 
 def save_care_plan(record: dict[str, Any]) -> None:
     append_jsonl(CARE_PLANS_PATH, {"timestamp": utc_now(), **record})
+
+
+def init_decision_db() -> None:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS care_plan_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id TEXT NOT NULL,
+                discharge_ts TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+                decided_at TEXT NOT NULL,
+                draft_plan TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_care_plan_decisions_patient_episode
+            ON care_plan_decisions(patient_id, discharge_ts, decided_at DESC)
+            """
+        )
+
+
+def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan: str) -> dict[str, Any]:
+    record = {
+        "patient_id": patient_id,
+        "discharge_ts": discharge_ts,
+        "decision": decision,
+        "decided_at": utc_now(),
+        "draft_plan": draft_plan,
+    }
+    init_decision_db()
+    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO care_plan_decisions
+                (patient_id, discharge_ts, decision, decided_at, draft_plan)
+            VALUES
+                (:patient_id, :discharge_ts, :decision, :decided_at, :draft_plan)
+            """,
+            record,
+        )
+    return record
+
+
+def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[str, Any] | None:
+    init_decision_db()
+    sql = """
+        SELECT patient_id, discharge_ts, decision, decided_at, draft_plan
+        FROM care_plan_decisions
+        WHERE patient_id = ?
+    """
+    params: list[Any] = [patient_id]
+    if discharge_ts is not None:
+        sql += " AND discharge_ts = ?"
+        params.append(discharge_ts)
+    sql += " ORDER BY decided_at DESC, id DESC LIMIT 1"
+
+    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(sql, params).fetchone()
+    return dict(row) if row else None
 
 
 def runtime_dependency_report(cfg: Config) -> dict[str, Any]:

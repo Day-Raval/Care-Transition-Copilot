@@ -26,12 +26,17 @@ from src.utils.runtime import RISK_API_TIMEOUT_SECONDS
 API_BASE_URL = os.getenv("RISK_API_BASE_URL", "http://localhost:8080")
 
 
-def get_patient_features(patient_id: str) -> dict:
+def get_patient_features(patient_id: str, discharge_ts: str | None = None) -> dict:
     cfg = load_config()
     df = pd.read_csv(cfg.output_csv.replace(".csv", "_with_target.csv"))
     patient_rows = df[df["patient_id"] == patient_id]
     if patient_rows.empty:
         raise ValueError(f"No episode found for patient_id={patient_id} in the processed dataset.")
+
+    if discharge_ts is not None:
+        patient_rows = patient_rows[patient_rows["discharge_ts"].astype(str) == discharge_ts]
+        if patient_rows.empty:
+            raise ValueError(f"No episode found for patient_id={patient_id} discharge_ts={discharge_ts}.")
 
     row = patient_rows.sort_values("discharge_ts").iloc[-1]
 
@@ -45,11 +50,13 @@ def get_patient_features(patient_id: str) -> dict:
     }, str(row.get("admission_reason", "unknown")), str(row.get("patient_name", "Unknown Patient"))
 
 
-def assess_risk(patient_id: str) -> dict:
-    features, admission_reason, patient_name = get_patient_features(patient_id)
+def assess_risk(patient_id: str, discharge_ts: str | None = None) -> dict:
+    features, admission_reason, patient_name = get_patient_features(patient_id, discharge_ts)
+    api_key = os.getenv("API_KEY")
+    headers = {"X-API-Key": api_key} if api_key else {}
 
     try:
-        response = requests.post(f"{API_BASE_URL}/predict", json=features, timeout=RISK_API_TIMEOUT_SECONDS)
+        response = requests.post(f"{API_BASE_URL}/predict", json=features, headers=headers, timeout=RISK_API_TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.exceptions.ConnectionError:
         raise RuntimeError(

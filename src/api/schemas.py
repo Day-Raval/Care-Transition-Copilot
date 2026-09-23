@@ -70,6 +70,7 @@ class QueueItem(BaseModel):
 
 class FullAssessment(BaseModel):
     patient_id: str
+    discharge_ts: str
     patient_name: str
     risk_score: float
     risk_percentile: float
@@ -95,6 +96,18 @@ class ChatToolCall(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     tool_calls: list[ChatToolCall]
+
+
+class DecisionRequest(BaseModel):
+    decision: str = Field(..., pattern="^(approved|rejected)$")
+
+
+class DecisionRecord(BaseModel):
+    patient_id: str
+    discharge_ts: str
+    decision: str
+    decided_at: str
+    draft_plan: str
 
 
 class DriftReport(BaseModel):

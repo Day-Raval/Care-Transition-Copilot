@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getQueue, getAssessment } from "../api.js";
+import { getQueue, getAssessment, getDecision, saveDecision } from "../api.js";
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
@@ -279,6 +279,8 @@ export default function Dashboard() {
   const [assessment, setAssessment] = useState(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [loadingAssessment, setLoadingAssessment] = useState(false);
+  const [decision, setDecision] = useState(null);
+  const [savingDecision, setSavingDecision] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -291,12 +293,29 @@ export default function Dashboard() {
   function selectPatient(item) {
     setSelected(item);
     setAssessment(null);
+    setDecision(null);
     setError(null);
     setLoadingAssessment(true);
-    getAssessment(item.patient_id)
-      .then(setAssessment)
+    Promise.all([
+      getAssessment(item.patient_id, item.discharge_ts),
+      getDecision(item.patient_id, item.discharge_ts),
+    ])
+      .then(([assessmentResult, decisionResult]) => {
+        setAssessment(assessmentResult);
+        setDecision(decisionResult);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingAssessment(false));
+  }
+
+  function recordDecision(nextDecision) {
+    if (!selected) return;
+    setSavingDecision(true);
+    setError(null);
+    saveDecision(selected.patient_id, selected.discharge_ts, nextDecision)
+      .then(setDecision)
+      .catch((e) => setError(e.message))
+      .finally(() => setSavingDecision(false));
   }
 
   const isLowRisk = assessment?.risk_category === "low";
@@ -316,7 +335,7 @@ export default function Dashboard() {
             {queue.map((item) => (
               <div
                 key={`${item.patient_id}-${item.discharge_ts}`}
-                className={`queue-card ${selected?.patient_id === item.patient_id ? "selected" : ""}`}
+                className={`queue-card ${selected?.patient_id === item.patient_id && selected?.discharge_ts === item.discharge_ts ? "selected" : ""}`}
                 onClick={() => selectPatient(item)}
               >
                 <div className="queue-card-main">
@@ -435,12 +454,33 @@ export default function Dashboard() {
                     />
                   </details>
 
-                  <div className="action-buttons">
-                    <button className="btn approve" disabled>Approve</button>
-                    <button className="btn edit" disabled>Edit</button>
-                    <button className="btn reject" disabled>Reject</button>
-                  </div>
-                  <div className="btn-note">Not yet wired to a backend action.</div>
+                  {decision ? (
+                    <div className={`decision-badge ${decision.decision}`}>
+                      {decision.decision === "approved" ? "Approved" : "Rejected"} on{" "}
+                      {new Date(decision.decided_at).toLocaleString()}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="action-buttons">
+                        <button
+                          className="btn approve"
+                          disabled={savingDecision}
+                          onClick={() => recordDecision("approved")}
+                        >
+                          Approve
+                        </button>
+                        <button className="btn edit" disabled>Edit</button>
+                        <button
+                          className="btn reject"
+                          disabled={savingDecision}
+                          onClick={() => recordDecision("rejected")}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                      <div className="btn-note">Edit is not wired yet.</div>
+                    </>
+                  )}
                 </>
               )}
             </>

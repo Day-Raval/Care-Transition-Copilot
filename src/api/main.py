@@ -35,6 +35,8 @@ carries that disclaimer.
 import logging
 import os
 import sys
+import threading
+import time
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -49,10 +51,21 @@ load_dotenv()  # must run before /assessment or /chat are ever called —
 
 sys.path.insert(0, ".")
 from src.api.drift_monitor import compute_drift_report, log_prediction
-from src.api.production import CARE_PLANS_PATH, log_audit_event, read_jsonl, runtime_dependency_report, save_care_plan
+from src.api.production import (
+    CARE_PLANS_PATH,
+    init_decision_db,
+    latest_decision,
+    log_audit_event,
+    read_jsonl,
+    runtime_dependency_report,
+    save_care_plan,
+    save_decision,
+)
 from src.api.schemas import (
     ChatRequest,
     ChatResponse,
+    DecisionRecord,
+    DecisionRequest,
     DriftReport,
     FullAssessment,
     ModelInfo,
@@ -91,12 +104,12 @@ _state = {}
 
 
 @app.middleware("http")
-async def optional_demo_auth(request: Request, call_next):
-    expected_token = os.getenv("DEMO_API_KEY")
-    if expected_token and request.url.path != "/health":
-        provided_token = request.headers.get("x-demo-token")
-        if provided_token != expected_token:
-            return JSONResponse(status_code=401, content={"detail": "Missing or invalid demo token"})
+async def api_key_auth(request: Request, call_next):
+    if request.url.path != "/health" and request.method != "OPTIONS":
+        expected_key = os.getenv("API_KEY")
+        provided_key = request.headers.get("x-api-key")
+        if not expected_key or provided_key != expected_key:
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid API key"})
     return await call_next(request)
 
 
@@ -115,6 +128,104 @@ def _categorize(percentile: float) -> str:
     if percentile >= 50:
         return "medium"
     return "low"
+
+
+def _cache_ttl_seconds() -> int:
+    try:
+        return max(0, int(os.getenv("CACHE_TTL_SECONDS", "600")))
+    except ValueError:
+        return 600
+
+
+def _latest_discharge_ts(patient_id: str, discharge_ts: str | None = None) -> str:
+    queue_df = _state["queue_df"]
+    patient_rows = queue_df[queue_df["patient_id"] == patient_id]
+    if patient_rows.empty:
+        raise HTTPException(status_code=404, detail=f"No episode found for patient_id={patient_id}")
+    if discharge_ts is not None:
+        episode_rows = patient_rows[patient_rows["discharge_ts"].astype(str) == discharge_ts]
+        if episode_rows.empty:
+            raise HTTPException(status_code=404, detail=f"No episode found for patient_id={patient_id} discharge_ts={discharge_ts}")
+        return str(episode_rows.sort_values("discharge_ts").iloc[-1]["discharge_ts"])
+    return str(patient_rows.sort_values("discharge_ts").iloc[-1]["discharge_ts"])
+
+
+def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment | None:
+    ttl = _cache_ttl_seconds()
+    if ttl <= 0:
+        return None
+    key = (patient_id, discharge_ts)
+    with _state["assessment_cache_lock"]:
+        cached = _state["assessment_cache"].get(key)
+        if not cached:
+            return None
+        expires_at, payload = cached
+        if expires_at < time.monotonic():
+            _state["assessment_cache"].pop(key, None)
+            return None
+    return FullAssessment(**payload)
+
+
+def _assessment_cache_set(assessment: FullAssessment) -> None:
+    ttl = _cache_ttl_seconds()
+    if ttl <= 0:
+        return
+    key = (assessment.patient_id, assessment.discharge_ts)
+    with _state["assessment_cache_lock"]:
+        _state["assessment_cache"][key] = (
+            time.monotonic() + ttl,
+            assessment.model_dump(),
+        )
+
+
+def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
+    from src.agents.orchestrator import LOW_RISK_CATEGORY, build_graph
+
+    try:
+        graph = build_graph()
+        result = graph.invoke({"patient_id": patient_id, "discharge_ts": discharge_ts})
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    is_low_risk = result["risk_category"] == LOW_RISK_CATEGORY
+    assessment = FullAssessment(
+        patient_id=patient_id,
+        discharge_ts=discharge_ts,
+        patient_name=result["patient_name"],
+        risk_score=result["risk_score"],
+        risk_percentile=result["risk_percentile"],
+        risk_category=result["risk_category"],
+        admission_reason=result["admission_reason"],
+        patient_context_summary=result.get("patient_context_summary", ""),
+        categories_with_no_match=result.get("categories_with_no_match", []),
+        draft_plan=result["final_summary"] if is_low_risk else result["draft_plan"],
+        critique_notes=result.get("critique_notes", ""),
+        disclaimer=DISCLAIMER,
+    )
+    save_care_plan(
+        {
+            "patient_id": assessment.patient_id,
+            "discharge_ts": assessment.discharge_ts,
+            "patient_name": assessment.patient_name,
+            "risk_category": assessment.risk_category,
+            "risk_percentile": assessment.risk_percentile,
+            "admission_reason": assessment.admission_reason,
+            "draft_plan": assessment.draft_plan,
+            "critique_notes": assessment.critique_notes,
+            "model_run_id": _state["run_id"],
+        }
+    )
+    log_audit_event(
+        "assessment_generated",
+        patient_id=assessment.patient_id,
+        discharge_ts=assessment.discharge_ts,
+        risk_category=assessment.risk_category,
+        risk_percentile=assessment.risk_percentile,
+    )
+    _assessment_cache_set(assessment)
+    return assessment
 
 
 @app.on_event("startup")
@@ -151,6 +262,9 @@ def load_production_model():
     _state["run_id"] = cfg.production_run_id
     _state["training_events"] = int(modeling_df["event_observed"].sum())
     _state["queue_df"] = modeling_df[["patient_id", "patient_name", "discharge_ts", "admission_reason"]].reset_index(drop=True)
+    _state["assessment_cache"] = {}
+    _state["assessment_cache_lock"] = threading.Lock()
+    init_decision_db()
 
     PatientFeaturesModel = build_patient_features_model(feature_names)
     _state["patient_schema"] = PatientFeaturesModel
@@ -245,7 +359,7 @@ def patient_queue(limit: int = 50, category: str | None = None):
 
 
 @app.get("/patients/{patient_id}/assessment", response_model=FullAssessment)
-def patient_assessment(patient_id: str):
+def patient_assessment(patient_id: str, discharge_ts: str | None = None):
     """
     Runs the full orchestrator graph (risk -> retrieval -> reasoning ->
     critique) for one patient. Makes real LLM calls — slower and costs
@@ -254,49 +368,42 @@ def patient_assessment(patient_id: str):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    from src.agents.orchestrator import LOW_RISK_CATEGORY, build_graph
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    cached = _assessment_cache_get(patient_id, episode_discharge_ts)
+    if cached is not None:
+        return cached
+    return _generate_assessment(patient_id, episode_discharge_ts)
 
-    try:
-        graph = build_graph()
-        result = graph.invoke({"patient_id": patient_id})
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
 
-    is_low_risk = result["risk_category"] == LOW_RISK_CATEGORY
-    assessment = FullAssessment(
+@app.get("/patients/{patient_id}/decision", response_model=DecisionRecord | None)
+def patient_decision(patient_id: str, discharge_ts: str | None = None):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts) if discharge_ts else None
+    return latest_decision(patient_id, episode_discharge_ts)
+
+
+@app.post("/patients/{patient_id}/decision", response_model=DecisionRecord)
+def decide_patient_plan(patient_id: str, request: DecisionRequest, discharge_ts: str | None = None):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
+    if assessment is None:
+        assessment = _generate_assessment(patient_id, episode_discharge_ts)
+    record = save_decision(
         patient_id=patient_id,
-        patient_name=result["patient_name"],
-        risk_score=result["risk_score"],
-        risk_percentile=result["risk_percentile"],
-        risk_category=result["risk_category"],
-        admission_reason=result["admission_reason"],
-        patient_context_summary=result.get("patient_context_summary", ""),
-        categories_with_no_match=result.get("categories_with_no_match", []),
-        draft_plan=result["final_summary"] if is_low_risk else result["draft_plan"],
-        critique_notes=result.get("critique_notes", ""),
-        disclaimer=DISCLAIMER,
-    )
-    save_care_plan(
-        {
-            "patient_id": assessment.patient_id,
-            "patient_name": assessment.patient_name,
-            "risk_category": assessment.risk_category,
-            "risk_percentile": assessment.risk_percentile,
-            "admission_reason": assessment.admission_reason,
-            "draft_plan": assessment.draft_plan,
-            "critique_notes": assessment.critique_notes,
-            "model_run_id": _state["run_id"],
-        }
+        discharge_ts=episode_discharge_ts,
+        decision=request.decision,
+        draft_plan=assessment.draft_plan,
     )
     log_audit_event(
-        "assessment_generated",
-        patient_id=assessment.patient_id,
-        risk_category=assessment.risk_category,
-        risk_percentile=assessment.risk_percentile,
+        "care_plan_decision_recorded",
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        decision=request.decision,
     )
-    return assessment
+    return DecisionRecord(**record)
 
 
 @app.get("/care-plans")
