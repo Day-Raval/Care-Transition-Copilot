@@ -122,6 +122,7 @@ comparison becomes possible at the current ~2% event rate.
 | `data/processed/discharge_records_with_target.csv` | The modeling dataset — one row per episode, with the final target columns |
 | `results/experiments.csv` | Every logged training run, comparable side by side |
 | `models/*.joblib` | Saved model files, one per logged run (gitignored — regenerable) |
+| `results/decisions.sqlite3` | Local approve/reject decisions for generated care plans (gitignored) |
 | `results/fairness_audit_*.txt` | Timestamped fairness audit reports |
 
 ---
@@ -386,10 +387,18 @@ gaps that were previously obvious in local testing.
   controlled error message while the server logs the traceback.
 - Added dependency-aware `/health` output so setup problems such as missing
   processed data, vector store, production run id, or Groq key are visible.
-- Added optional demo-token protection through `DEMO_API_KEY`.
+- Added required API-key protection for non-health endpoints through `API_KEY`
+  and the `X-API-Key` request header.
+- Added episode-specific assessment support through the optional `discharge_ts`
+  query parameter, so repeat patients are not collapsed to patient ID alone.
+- Added an in-process assessment cache controlled by `CACHE_TTL_SECONDS` to
+  avoid regenerating the same LLM-backed assessment on every dashboard click.
 - Added file-based audit logging to `results/audit_log.jsonl`.
 - Added file-based saved care plans to `results/care_plans.jsonl`.
+- Added SQLite-backed care-plan decision storage in `results/decisions.sqlite3`.
 - Added `GET /care-plans` to inspect saved generated plans.
+- Added `GET` and `POST /patients/{patient_id}/decision` for retrieving and
+  recording the latest approve/reject decision for a patient episode.
 
 ### Runtime controls (`src/utils/runtime.py`, agent modules)
 - Added configurable timeouts for Groq calls via `LLM_TIMEOUT_SECONDS`.
@@ -404,7 +413,7 @@ gaps that were previously obvious in local testing.
 - Added a Care plans page that selects a patient and generates/views the draft
   follow-up plan.
 - Added frontend request timeout handling via `VITE_REQUEST_TIMEOUT_MS` and
-  optional demo-token header support via `VITE_DEMO_API_KEY`.
+  API-key header support via `VITE_API_KEY`.
 - Added reusable loading/error/empty states for web pages.
 - Removed Synthea's numeric suffixes from patient names in display only.
 - Removed the dashboard fairness banner from the main workflow while preserving
@@ -455,6 +464,29 @@ with exact real discharge-note excerpts from `data/processed/discharge_notes.jso
 
 Confirmed build: `npm.cmd run build`.
 
+## Latest Workflow Validation - Assessment Cache and Decisions
+
+**Status: Backend decision path wired for approve/reject.**
+
+The dashboard now loads assessments by patient episode (`patient_id` plus
+`discharge_ts`) and fetches any existing clinician decision alongside the
+assessment. This fixes the prior limitation where a repeated patient could be
+treated as one undifferentiated case in the review flow.
+
+### What was added
+
+| Addition | Current behavior |
+|---|---|
+| API key auth | All non-health endpoints require `X-API-Key` matching `API_KEY` |
+| Assessment cache | Generated assessments are cached per patient episode for `CACHE_TTL_SECONDS`; set to `0` to disable |
+| Episode-specific assessment | `/patients/{patient_id}/assessment` accepts `discharge_ts` |
+| Decision read/write | `/patients/{patient_id}/decision` supports latest-decision lookup and approve/reject writes |
+| Decision persistence | Decisions are stored locally in `results/decisions.sqlite3` with patient ID, discharge timestamp, decision, decided time, and draft plan |
+| Dashboard actions | Approve and Reject are active buttons; saved decisions render as status badges |
+
+Edit remains intentionally unwired in this pass. The current backend stores
+only final `approved` or `rejected` decisions, not edited plan text.
+
 ## Next steps
 
 1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
@@ -473,13 +505,15 @@ Confirmed build: `npm.cmd run build`.
 8. ~~Clinician Web App (React UI — risk queue dashboard, patient list,
    care-plan view, chat)~~ — **First pass done.**
 9. ~~Apply first production-grade hardening pass~~ — **Done.** Added safe API
-   errors, health dependency checks, request timeouts, optional demo-token
-   protection, audit logging, and saved care-plan records.
+   errors, health dependency checks, request timeouts, API-key protection,
+   audit logging, saved care-plan records, assessment caching, and decision
+   storage.
 10. ~~Fix cited-context display formatting and deduplication in the dashboard~~
    — **Done.** Validated against live assessment payloads and real discharge-note
    excerpts.
-11. Next up: wire clinician approve/edit/reject actions to real backend state.
-12. Next up: replace file-based audit/care-plan persistence with managed
-   database tables.
+11. ~~Wire clinician approve/reject actions to real backend state~~ — **Done.**
+   Edit remains open.
+12. Next up: replace local JSONL/SQLite persistence with managed database
+   tables.
 13. Next up: add true authentication/RBAC and FHIR write-back/notification
    stubs.

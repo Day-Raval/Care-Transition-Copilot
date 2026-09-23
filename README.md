@@ -51,9 +51,10 @@ target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
 section-aware note chunking, vector-store indexing, risk-model API,
 risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
 critique agent, risk-gated LangGraph orchestration, free-form tool-calling chat
-agent, a React clinician UI, file-based audit logging, and saved draft care-plan
-persistence. Full EHR write-back, production identity/RBAC, and managed
-platform services are still planned work.
+agent, a React clinician UI, API-key protection, cached episode-specific
+assessments, file-based audit logging, saved draft care-plan persistence, and
+SQLite-backed approve/reject decisions. Full EHR write-back, production
+identity/RBAC, and managed platform services are still planned work.
 
 ```mermaid
 flowchart TB
@@ -147,11 +148,13 @@ flowchart TB
   critique step for medium/high-risk patients. The pipeline keeps missing
   documentation explicit instead of smoothing over gaps.
 - **Implemented review surface** - the React web app now includes a risk queue,
-  Patients view, Care plans view, and ad hoc chat interface. Draft plans remain
-  visibly pending clinician action.
+  Patients view, Care plans view, ad hoc chat interface, and dashboard
+  approve/reject actions persisted through the API. Draft plans remain visibly
+  pending until a clinician action is recorded.
 - **Implemented production safeguards** - the API has safe error handling,
-  health dependency reporting, optional demo-token protection, request timeouts,
-  file-based audit logging, and saved draft care-plan records.
+  health dependency reporting, required API-key protection, request timeouts,
+  cached assessment generation, file-based audit logging, saved draft care-plan
+  records, and SQLite-backed care-plan decision records.
 - **Planned platform services** - OAuth2/RBAC, managed database persistence,
   CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
   notification delivery remain future hardening work.
@@ -163,7 +166,8 @@ The MVP focuses on four user-facing capabilities:
 - Risk scoring for recently discharged patients.
 - Clinical context retrieval with source citations.
 - Care-plan orchestration with draft, critique, and explanation steps.
-- Clinician actions to approve, edit, reject, notify, or open the patient portal.
+- Clinician approve/reject actions for draft care plans; edit, notify, and
+  portal handoff remain planned workflow extensions.
 
 ## Implemented progress
 
@@ -249,14 +253,18 @@ The current repository shows the first stage of the MVP working locally:
   toward validated clinical query phrasings instead of vague searches such as
   "discharge summary."
 - Added production-readiness helpers around the API: safe unhandled-error
-  responses, optional `DEMO_API_KEY` protection, `/health` dependency checks,
-  configurable LLM/risk-API timeouts, file-based audit logging in
-  `results/audit_log.jsonl`, and saved generated care plans in
+  responses, required `API_KEY` protection for non-health endpoints, `/health`
+  dependency checks, configurable LLM/risk-API timeouts, file-based audit
+  logging in `results/audit_log.jsonl`, and saved generated care plans in
   `results/care_plans.jsonl`.
 - Added the first React clinician workflow beyond the risk queue:
   `/patients` lists recent discharged patients, `/care-plans` lets a user select
   a patient and generate/view a draft follow-up plan, and `/chat` renders
   assistant answers as formatted notes with visible tool-call audit trails.
+- Added episode-specific assessment and decision APIs. Assessments now accept an
+  optional `discharge_ts`, cache generated agent results for the configured
+  `CACHE_TTL_SECONDS`, and the dashboard can record approve/reject decisions to
+  `results/decisions.sqlite3`.
 - Updated the dashboard evidence panel to show cited chart excerpts directly in
   the Patient evidence panel, grouped by retrieval category and source. The
   display layer strips repeated headers, deduplicates repeated clinical items,
@@ -318,7 +326,7 @@ Latest agent-orchestration summary:
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
-| Production guardrails | Safe API error handling, dependency-aware `/health`, optional demo token, request timeouts, audit JSONL, and saved care-plan JSONL |
+| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, cached assessments, audit JSONL, saved care-plan JSONL, and SQLite decision records |
 | React clinician UI | Risk queue, Patients, Care plans, and Ask a question routes with formatted markdown responses and deduplicated cited chart excerpts |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
@@ -334,7 +342,7 @@ Implemented locally in `web/`:
   repeated headers removed, duplicate clinical bullets collapsed, and procedures,
   labs, medications, and care-plan items formatted under clear subheaders.
 - **Draft follow-up plan** - renders the generated plan, critique status, and
-  clinician action placeholders.
+  persisted approve/reject decision state. Edit remains a placeholder.
 - **Patients** - lists recent patients from the API with cleaned display names.
 - **Care plans** - selects a patient and generates/views their draft plan.
 - **Ask a question** - supports free-form patient questions with visible tool
@@ -358,8 +366,10 @@ experiment logging/model saving, fairness-audit infrastructure, section-aware
 note chunking, ChromaDB vector-store indexing, FastAPI model serving,
 patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
 categories, grounded care-plan drafting, second-model critique, risk-gated
-LangGraph orchestration, an auditable tool-calling chat agent, and a React UI
-with risk queue, Patients, Care plans, and Ask a question routes.
+LangGraph orchestration, an auditable tool-calling chat agent, API-key protected
+serving, cached episode-specific assessment generation, approve/reject decision
+persistence, and a React UI with risk queue, Patients, Care plans, Ask a
+question routes, and dashboard clinician decision controls.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -370,10 +380,9 @@ enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
 audit, calibrating retrieval distance thresholds against labeled relevance
-examples, strengthening reasoning/critique model independence, replacing
-file-based persistence with managed storage, adding true auth/RBAC, wiring
-clinician approve/edit/reject actions, and adding FHIR write-back/notification
-stubs.
+examples, strengthening reasoning/critique model independence, replacing local
+JSONL/SQLite persistence with managed storage, adding true auth/RBAC, wiring the
+care-plan edit workflow, and adding FHIR write-back/notification stubs.
 
 ## Getting started
 
@@ -387,6 +396,8 @@ stubs.
   default local embedding model
 - `GROQ_API_KEY` in `.env` for the reasoning and critique agents. Optional
   overrides: `GROQ_MODEL`, `CRITIQUE_MODEL_NAME`, and `CRITIQUE_MODEL_API_KEY`.
+- `API_KEY` in `.env` for the FastAPI service and matching `VITE_API_KEY` for
+  the React app.
 
 ### Setup
 
@@ -458,12 +469,12 @@ npm run dev -- --host 127.0.0.1
 ```
 
 Then open `http://127.0.0.1:5173/`. The web app expects the FastAPI service on
-`http://localhost:8080` by default. Optional production-hardening environment
-variables include `DEMO_API_KEY` on the API side and `VITE_DEMO_API_KEY` on the
-web side, plus `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`, and
-`VITE_REQUEST_TIMEOUT_MS`. Assessment requests can use a longer frontend timeout
-through `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval and care-plan drafting can
-take longer than ordinary API reads.
+`http://localhost:8080` by default. Set matching `API_KEY` and `VITE_API_KEY`
+values so browser requests can pass the required `X-API-Key` header. Optional
+runtime variables include `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`,
+`CACHE_TTL_SECONDS`, and `VITE_REQUEST_TIMEOUT_MS`. Assessment requests can use
+a longer frontend timeout through `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval
+and care-plan drafting can take longer than ordinary API reads.
 
 ### API smoke tests
 
@@ -477,7 +488,9 @@ PowerShell:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/health
 
-Invoke-RestMethod http://127.0.0.1:8080/model-info
+$headers = @{ "X-API-Key" = $env:API_KEY }
+
+Invoke-RestMethod http://127.0.0.1:8080/model-info -Headers $headers
 
 $body = @{
   age_at_discharge = 72
@@ -492,9 +505,20 @@ Invoke-RestMethod `
   -Uri http://127.0.0.1:8080/predict `
   -Method Post `
   -ContentType "application/json" `
+  -Headers $headers `
   -Body $body
 
-Invoke-RestMethod http://127.0.0.1:8080/drift-report
+Invoke-RestMethod http://127.0.0.1:8080/drift-report -Headers $headers
+
+$patientId = "<patient_id>"
+$dischargeTs = "<discharge_ts>"
+
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8080/patients/$patientId/decision?discharge_ts=$dischargeTs" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Headers $headers `
+  -Body (@{ decision = "approved" } | ConvertTo-Json)
 ```
 
 Bash/curl:
@@ -502,10 +526,11 @@ Bash/curl:
 ```bash
 curl http://127.0.0.1:8080/health
 
-curl http://127.0.0.1:8080/model-info
+curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8080/model-info
 
 curl -X POST http://127.0.0.1:8080/predict \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
   -d '{
     "age_at_discharge": 72,
     "length_of_stay_days": 5,
@@ -515,14 +540,21 @@ curl -X POST http://127.0.0.1:8080/predict \
     "med_flag_anticoagulant": false
   }'
 
-curl http://127.0.0.1:8080/drift-report
+curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8080/drift-report
 
-curl http://127.0.0.1:8080/care-plans
+curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8080/care-plans
+
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  "http://127.0.0.1:8080/patients/<patient_id>/decision?discharge_ts=<discharge_ts>" \
+  -d '{"decision":"approved"}'
 ```
 
 `/predict` returns a relative Cox risk score, percentile, and low/medium/high
 risk category. `/drift-report` needs at least 30 logged predictions before it
-can make a meaningful drift assessment.
+can make a meaningful drift assessment. `/patients/{patient_id}/decision`
+records `approved` or `rejected` for the selected patient episode.
 
 ### Useful analysis scripts
 
@@ -599,6 +631,7 @@ data/
 results/
 |-- RESULTS.md                     # Narrative summary of current model findings
 |-- experiments.csv                # Logged training runs
+|-- decisions.sqlite3              # Local approve/reject care-plan decisions, gitignored
 `-- fairness_audit_*.txt           # Timestamped fairness-audit reports
 
 models/
@@ -619,7 +652,7 @@ or data use agreement is required to run or demo it. See
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
-| Implemented API | FastAPI, Uvicorn, Pydantic, file-based audit/care-plan logs |
+| Implemented API | FastAPI, Uvicorn, Pydantic, API-key auth, assessment cache, file-based audit/care-plan logs, SQLite decision records |
 | Implemented frontend | React, Vite, React Router |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned notifications | Twilio or patient portal stub |
