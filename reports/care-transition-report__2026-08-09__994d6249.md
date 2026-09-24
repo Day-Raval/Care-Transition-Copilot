@@ -8,7 +8,17 @@
 **Approved at:** 2026-09-23T19:24:17+00:00
 
 ## Medication Context
-Medications: midazolam 1 mg/ml injectable solution; simvastatin 10 mg oral tablet; 100 ml propofol 10 mg/ml injection; rocuronium bromide 10 mg/ml injectable solution; 1 ml heparin sodium, porcine 5000 unt/ml injection; 25 ml protamine sulfate (usp) 10 mg/ml injection; 2 ml ondansetron 2 mg/ml injection; isoflurane 999 mg/ml inhalation solution; cefazolin 2000 mg injection; 10 ml fentanyl 0.05 mg/ml injection; sodium fluoride 0.0272 mg/mg oral gel
+- midazolam 1 mg/ml injectable solution
+- simvastatin 10 mg oral tablet
+- 100 ml propofol 10 mg/ml injection
+- rocuronium bromide 10 mg/ml injectable solution
+- 1 ml heparin sodium, porcine 5000 unt/ml injection
+- 25 ml protamine sulfate (usp) 10 mg/ml injection
+- 2 ml ondansetron 2 mg/ml injection
+- isoflurane 999 mg/ml inhalation solution
+- cefazolin 2000 mg injection
+- 10 ml fentanyl 0.05 mg/ml injection
+- sodium fluoride 0.0272 mg/mg oral gel
 
 ## Care Plan and Follow-Up Plan
 **KEY RISK FACTORS TO MONITOR**  

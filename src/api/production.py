@@ -67,7 +67,11 @@ def save_care_plan(record: dict[str, Any]) -> None:
 
 def medication_context(summary: str) -> str:
     lines = [line.strip() for line in summary.splitlines() if "medication" in line.lower()]
-    return "\n".join(lines) if lines else "No medication-specific chart excerpts were returned."
+    medications = []
+    for line in lines:
+        body = re.sub(r"^[-*\s\[\]A-Za-z]*medications?:\s*", "", line, flags=re.IGNORECASE)
+        medications.extend(item.strip(" .") for item in body.split(";") if item.strip(" ."))
+    return "\n".join(f"- {item}" for item in medications) if medications else "No medication-specific chart excerpts were returned."
 
 
 def build_transition_report(assessment: Any, decision: dict[str, Any], disclaimer: str) -> str:

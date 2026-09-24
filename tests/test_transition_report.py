@@ -16,7 +16,7 @@ class TransitionReportTest(unittest.TestCase):
             admission_reason="Heart failure",
             risk_category="high",
             risk_percentile=91.2,
-            patient_context_summary="- [Medication] patient prescribed furosemide",
+            patient_context_summary="Medications: furosemide; lisinopril",
             critique_notes="No unsupported claims flagged.",
         )
         decision = {
@@ -28,7 +28,8 @@ class TransitionReportTest(unittest.TestCase):
         report = build_transition_report(assessment, decision, "Synthetic demo only.")
 
         self.assertIn("Dr. Patel", report)
-        self.assertIn("furosemide", report)
+        self.assertIn("- furosemide", report)
+        self.assertIn("- lisinopril", report)
         self.assertIn("Follow up with cardiology", report)
         self.assertIn("Synthetic demo only.", report)
 
