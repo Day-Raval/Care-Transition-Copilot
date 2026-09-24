@@ -83,6 +83,22 @@ def init_decision_db() -> None:
             ON care_plan_decisions(patient_id, discharge_ts, decided_at DESC)
             """
         )
+        conn.execute(
+            """
+            DELETE FROM care_plan_decisions
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM care_plan_decisions
+                GROUP BY patient_id, discharge_ts
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_care_plan_decisions_one_per_episode
+            ON care_plan_decisions(patient_id, discharge_ts)
+            """
+        )
 
 
 def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan: str) -> dict[str, Any]:
@@ -101,6 +117,10 @@ def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan:
                 (patient_id, discharge_ts, decision, decided_at, draft_plan)
             VALUES
                 (:patient_id, :discharge_ts, :decision, :decided_at, :draft_plan)
+            ON CONFLICT(patient_id, discharge_ts) DO UPDATE SET
+                decision = excluded.decision,
+                decided_at = excluded.decided_at,
+                draft_plan = excluded.draft_plan
             """,
             record,
         )
