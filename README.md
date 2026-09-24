@@ -149,12 +149,14 @@ flowchart TB
   documentation explicit instead of smoothing over gaps.
 - **Implemented review surface** - the React web app now includes a risk queue,
   Patients view, Care plans view, ad hoc chat interface, and dashboard
-  approve/reject actions persisted through the API. Draft plans remain visibly
-  pending until a clinician action is recorded.
+  approve/reject actions persisted through the API. Approved plans can generate
+  mock care-transition reports, while rejected plans remain marked for edit and
+  resubmission.
 - **Implemented production safeguards** - the API has safe error handling,
   health dependency reporting, required API-key protection, request timeouts,
   cached assessment generation, file-based audit logging, saved draft care-plan
-  records, and SQLite-backed care-plan decision records.
+  records, request tracing, idempotent SQLite-backed care-plan decisions, and
+  actor tracking for clinician actions.
 - **Planned platform services** - OAuth2/RBAC, managed database persistence,
   CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
   notification delivery remain future hardening work.
@@ -166,7 +168,8 @@ The MVP focuses on four user-facing capabilities:
 - Risk scoring for recently discharged patients.
 - Clinical context retrieval with source citations.
 - Care-plan orchestration with draft, critique, and explanation steps.
-- Clinician approve/reject actions for draft care plans; edit, notify, and
+- Clinician approve/reject actions for draft care plans plus approved mock
+  care-transition report generation; edit, notify, and
   portal handoff remain planned workflow extensions.
 
 ## Implemented progress
@@ -265,6 +268,14 @@ The current repository shows the first stage of the MVP working locally:
   optional `discharge_ts`, cache generated agent results for the configured
   `CACHE_TTL_SECONDS`, and the dashboard can record approve/reject decisions to
   `results/decisions.sqlite3`.
+- Added request tracing with `X-Request-ID` across the API and web client so UI
+  errors can be matched to server logs. Care-plan decisions are now idempotent
+  per patient episode and store the acting clinician label, defaulting to
+  `demo_clinician` until real auth/RBAC is added.
+- Added approved mock care-transition reports. `GET /patients/{id}/report`
+  returns an approved Markdown report and saves it under `reports/` with public
+  demo naming such as `care-transition-report__2026-08-09__994d6249.md`.
+  Rejected drafts return an edit-required status instead of a finalized report.
 - Updated the dashboard evidence panel to show cited chart excerpts directly in
   the Patient evidence panel, grouped by retrieval category and source. The
   display layer strips repeated headers, deduplicates repeated clinical items,
@@ -326,8 +337,8 @@ Latest agent-orchestration summary:
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
-| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, cached assessments, audit JSONL, saved care-plan JSONL, and SQLite decision records |
-| React clinician UI | Risk queue, Patients, Care plans, and Ask a question routes with formatted markdown responses and deduplicated cited chart excerpts |
+| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, request IDs, cached assessments, audit JSONL, saved care-plan JSONL, idempotent SQLite decisions, and approved report export |
+| React clinician UI | Risk queue, Patients, Care plans, Ask a question, decision badges with actor labels, approved report preview, and rejected edit-required status |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -342,7 +353,9 @@ Implemented locally in `web/`:
   repeated headers removed, duplicate clinical bullets collapsed, and procedures,
   labs, medications, and care-plan items formatted under clear subheaders.
 - **Draft follow-up plan** - renders the generated plan, critique status, and
-  persisted approve/reject decision state. Edit remains a placeholder.
+  persisted approve/reject decision state. Approved decisions show a generated
+  mock care-transition report; rejected decisions show that the draft needs edit
+  and resubmission. Edit remains a placeholder.
 - **Patients** - lists recent patients from the API with cleaned display names.
 - **Care plans** - selects a patient and generates/views their draft plan.
 - **Ask a question** - supports free-form patient questions with visible tool
@@ -368,8 +381,10 @@ patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
 categories, grounded care-plan drafting, second-model critique, risk-gated
 LangGraph orchestration, an auditable tool-calling chat agent, API-key protected
 serving, cached episode-specific assessment generation, approve/reject decision
-persistence, and a React UI with risk queue, Patients, Care plans, Ask a
-question routes, and dashboard clinician decision controls.
+persistence, request tracing, idempotent actor-labeled decisions, approved
+care-transition report export, and a React UI with risk queue, Patients, Care
+plans, Ask a question routes, dashboard clinician decision controls, and report
+preview/status.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -549,12 +564,18 @@ curl -X POST \
   -H "X-API-Key: $API_KEY" \
   "http://127.0.0.1:8080/patients/<patient_id>/decision?discharge_ts=<discharge_ts>" \
   -d '{"decision":"approved"}'
+
+curl -H "X-API-Key: $API_KEY" \
+  "http://127.0.0.1:8080/patients/<patient_id>/report?discharge_ts=<discharge_ts>"
 ```
 
 `/predict` returns a relative Cox risk score, percentile, and low/medium/high
 risk category. `/drift-report` needs at least 30 logged predictions before it
 can make a meaningful drift assessment. `/patients/{patient_id}/decision`
-records `approved` or `rejected` for the selected patient episode.
+records `approved` or `rejected` for the selected patient episode. Repeated
+decision writes update the same episode record instead of creating duplicates.
+`/patients/{patient_id}/report` returns a Markdown report only for approved
+decisions; rejected decisions return an edit-required status.
 
 ### Useful analysis scripts
 
@@ -634,6 +655,10 @@ results/
 |-- decisions.sqlite3              # Local approve/reject care-plan decisions, gitignored
 `-- fairness_audit_*.txt           # Timestamped fairness-audit reports
 
+reports/
+|-- README.md                      # Demo report-folder notes
+`-- care-transition-report__*.md   # Public mock care-transition reports for demos
+
 models/
 `-- *.joblib                       # Saved run artifacts, gitignored/regenerable
 ```
@@ -652,7 +677,7 @@ or data use agreement is required to run or demo it. See
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
-| Implemented API | FastAPI, Uvicorn, Pydantic, API-key auth, assessment cache, file-based audit/care-plan logs, SQLite decision records |
+| Implemented API | FastAPI, Uvicorn, Pydantic, API-key auth, request tracing, assessment cache, file-based audit/care-plan logs, idempotent SQLite decision records, Markdown report export |
 | Implemented frontend | React, Vite, React Router |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned notifications | Twilio or patient portal stub |

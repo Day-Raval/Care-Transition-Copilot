@@ -396,9 +396,18 @@ gaps that were previously obvious in local testing.
 - Added file-based audit logging to `results/audit_log.jsonl`.
 - Added file-based saved care plans to `results/care_plans.jsonl`.
 - Added SQLite-backed care-plan decision storage in `results/decisions.sqlite3`.
+- Added request tracing with `X-Request-ID`, echoed by the API and shown in web
+  error messages so demo failures can be matched to server logs.
 - Added `GET /care-plans` to inspect saved generated plans.
 - Added `GET` and `POST /patients/{patient_id}/decision` for retrieving and
   recording the latest approve/reject decision for a patient episode.
+- Made care-plan decisions idempotent per `patient_id + discharge_ts`, with
+  actor tracking (`demo_clinician` by default until real auth/RBAC exists).
+- Added approved mock care-transition report generation through
+  `GET /patients/{patient_id}/report`. Approved reports are saved under
+  `reports/` using public demo filenames such as
+  `care-transition-report__2026-08-09__994d6249.md`; rejected drafts return an
+  edit-required status instead of a finalized report.
 
 ### Runtime controls (`src/utils/runtime.py`, agent modules)
 - Added configurable timeouts for Groq calls via `LLM_TIMEOUT_SECONDS`.
@@ -481,11 +490,14 @@ treated as one undifferentiated case in the review flow.
 | Assessment cache | Generated assessments are cached per patient episode for `CACHE_TTL_SECONDS`; set to `0` to disable |
 | Episode-specific assessment | `/patients/{patient_id}/assessment` accepts `discharge_ts` |
 | Decision read/write | `/patients/{patient_id}/decision` supports latest-decision lookup and approve/reject writes |
-| Decision persistence | Decisions are stored locally in `results/decisions.sqlite3` with patient ID, discharge timestamp, decision, decided time, and draft plan |
-| Dashboard actions | Approve and Reject are active buttons; saved decisions render as status badges |
+| Decision persistence | Decisions are stored locally in `results/decisions.sqlite3` with patient ID, discharge timestamp, decision, decided time, actor, and draft plan |
+| Decision idempotency | Repeated approve/reject writes update the same episode decision instead of inserting duplicates |
+| Report export | Approved decisions generate Markdown care-transition reports in `reports/`; rejected decisions show edit-required status |
+| Dashboard actions | Approve and Reject are active buttons; saved decisions render as status badges with actor labels and report preview/status |
 
-Edit remains intentionally unwired in this pass. The current backend stores
-only final `approved` or `rejected` decisions, not edited plan text.
+Edit remains intentionally unwired in this pass. Rejected drafts are clearly
+marked for edit and resubmission, but the current backend stores only final
+`approved` or `rejected` decisions, not edited plan text.
 
 ## Next steps
 
