@@ -69,6 +69,11 @@ export function saveDecision(patientId, dischargeTs, decision) {
   });
 }
 
+export function getReport(patientId, dischargeTs = null) {
+  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  return request(`/patients/${patientId}/report${params}`);
+}
+
 export function getSavedCarePlans(limit = 50) {
   return request(`/care-plans?${new URLSearchParams({ limit })}`);
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ RESULTS_DIR = Path("results")
 AUDIT_LOG_PATH = RESULTS_DIR / "audit_log.jsonl"
 CARE_PLANS_PATH = RESULTS_DIR / "care_plans.jsonl"
 DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
+REPORTS_DIR = Path("reports")
 CHROMA_PATH = "data/processed/chroma_db"
 DEFAULT_ACTOR = "demo_clinician"
 
@@ -61,6 +63,47 @@ def log_audit_event(event_type: str, **payload: Any) -> None:
 
 def save_care_plan(record: dict[str, Any]) -> None:
     append_jsonl(CARE_PLANS_PATH, {"timestamp": utc_now(), **record})
+
+
+def medication_context(summary: str) -> str:
+    lines = [line.strip() for line in summary.splitlines() if "medication" in line.lower()]
+    return "\n".join(lines) if lines else "No medication-specific chart excerpts were returned."
+
+
+def build_transition_report(assessment: Any, decision: dict[str, Any], disclaimer: str) -> str:
+    return "\n\n".join(
+        [
+            "# Mock Care Transition Report",
+            "\n".join(
+                [
+                    f"**Patient:** {assessment.patient_name}",
+                    f"**Discharge timestamp:** {assessment.discharge_ts}",
+                    f"**Admission reason:** {assessment.admission_reason}",
+                    f"**Readmission risk:** {assessment.risk_category} ({assessment.risk_percentile:.1f} percentile)",
+                    f"**Approved by:** {decision['actor']}",
+                    f"**Approved at:** {decision['decided_at']}",
+                ]
+            ),
+            "## Medication Context\n" + medication_context(assessment.patient_context_summary),
+            "## Care Plan and Follow-Up Plan\n" + decision["draft_plan"],
+            "## Independent Review Notes\n" + (assessment.critique_notes or "No critique notes recorded."),
+            "## Disclaimer\n" + disclaimer,
+        ]
+    )
+
+
+def public_report_path(patient_id: str, discharge_ts: str) -> Path:
+    date_match = re.search(r"\d{4}-\d{2}-\d{2}", discharge_ts)
+    discharge_date = date_match.group(0) if date_match else "unknown-date"
+    patient_slug = re.sub(r"[^a-zA-Z0-9]+", "-", patient_id).strip("-")[:8] or "patient"
+    return REPORTS_DIR / f"care-transition-report__{discharge_date}__{patient_slug}.md"
+
+
+def save_transition_report(patient_id: str, discharge_ts: str, report_markdown: str) -> Path:
+    path = public_report_path(patient_id, discharge_ts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report_markdown, encoding="utf-8")
+    return path
 
 
 def init_decision_db() -> None:

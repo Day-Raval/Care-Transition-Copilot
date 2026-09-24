@@ -112,6 +112,13 @@ class DecisionRecord(BaseModel):
     draft_plan: str
 
 
+class TransitionReport(BaseModel):
+    status: str
+    message: str
+    report_markdown: str | None = None
+    report_path: str | None = None
+
+
 class DriftReport(BaseModel):
     status: str
     n_recent_predictions: int

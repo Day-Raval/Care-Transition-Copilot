@@ -54,6 +54,7 @@ sys.path.insert(0, ".")
 from src.api.drift_monitor import compute_drift_report, log_prediction
 from src.api.production import (
     CARE_PLANS_PATH,
+    build_transition_report,
     init_decision_db,
     latest_decision,
     log_audit_event,
@@ -61,6 +62,7 @@ from src.api.production import (
     runtime_dependency_report,
     save_care_plan,
     save_decision,
+    save_transition_report,
 )
 from src.api.schemas import (
     ChatRequest,
@@ -72,6 +74,7 @@ from src.api.schemas import (
     ModelInfo,
     QueueItem,
     RiskPrediction,
+    TransitionReport,
     build_patient_features_model,
 )
 from src.model.experiment_registry import load_model
@@ -420,6 +423,43 @@ def decide_patient_plan(patient_id: str, request: DecisionRequest, discharge_ts:
         actor=request.actor,
     )
     return DecisionRecord(**record)
+
+
+@app.get("/patients/{patient_id}/report", response_model=TransitionReport)
+def patient_report(patient_id: str, discharge_ts: str | None = None):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    decision = latest_decision(patient_id, episode_discharge_ts)
+    if decision is None:
+        return TransitionReport(
+            status="pending_review",
+            message="No clinician decision has been recorded yet.",
+        )
+    if decision["decision"] == "rejected":
+        return TransitionReport(
+            status="rejected_edit_required",
+            message="Draft rejected. Edit the care plan, then send it for approval again.",
+        )
+
+    assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
+    if assessment is None:
+        assessment = _generate_assessment(patient_id, episode_discharge_ts)
+    report_markdown = build_transition_report(assessment, decision, DISCLAIMER)
+    report_path = save_transition_report(patient_id, episode_discharge_ts, report_markdown)
+    log_audit_event(
+        "transition_report_generated",
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        actor=decision["actor"],
+        report_path=str(report_path),
+    )
+    return TransitionReport(
+        status="approved",
+        message="Approved mock care-transition report generated.",
+        report_markdown=report_markdown,
+        report_path=str(report_path),
+    )
 
 
 @app.get("/care-plans")

@@ -230,6 +230,15 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
 }
 .decision-badge.approved { background: var(--ok-bg); color: var(--ok); }
 .decision-badge.rejected { background: var(--danger-bg); color: var(--danger); }
+.report-status, .report-preview {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #FFFFFF;
+}
+.report-status.rejected { border-color: #F0C4BE; color: var(--danger); background: var(--danger-bg); }
+.report-preview { max-height: 420px; overflow-y: auto; }
 
 /* Fairness banner */
 .fairness-banner {

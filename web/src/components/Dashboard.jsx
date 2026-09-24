@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getQueue, getAssessment, getDecision, saveDecision } from "../api.js";
+import { getQueue, getAssessment, getDecision, getReport, saveDecision } from "../api.js";
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
@@ -277,8 +277,10 @@ export default function Dashboard() {
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(null);
   const [assessment, setAssessment] = useState(null);
+  const [report, setReport] = useState(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [loadingAssessment, setLoadingAssessment] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [decision, setDecision] = useState(null);
   const [savingDecision, setSavingDecision] = useState(false);
   const [error, setError] = useState(null);
@@ -294,6 +296,7 @@ export default function Dashboard() {
     setSelected(item);
     setAssessment(null);
     setDecision(null);
+    setReport(null);
     setError(null);
     setLoadingAssessment(true);
     Promise.all([
@@ -303,17 +306,31 @@ export default function Dashboard() {
       .then(([assessmentResult, decisionResult]) => {
         setAssessment(assessmentResult);
         setDecision(decisionResult);
+        if (decisionResult) loadReport(item);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingAssessment(false));
   }
 
+  function loadReport(item) {
+    setLoadingReport(true);
+    setReport(null);
+    getReport(item.patient_id, item.discharge_ts)
+      .then(setReport)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoadingReport(false));
+  }
+
   function recordDecision(nextDecision) {
     if (!selected) return;
     setSavingDecision(true);
+    setReport(null);
     setError(null);
     saveDecision(selected.patient_id, selected.discharge_ts, nextDecision)
-      .then(setDecision)
+      .then((savedDecision) => {
+        setDecision(savedDecision);
+        loadReport(selected);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setSavingDecision(false));
   }
@@ -455,10 +472,28 @@ export default function Dashboard() {
                   </details>
 
                   {decision ? (
-                    <div className={`decision-badge ${decision.decision}`}>
-                      {decision.decision === "approved" ? "Approved" : "Rejected"} on{" "}
-                      {new Date(decision.decided_at).toLocaleString()}
-                    </div>
+                    <>
+                      <div className={`decision-badge ${decision.decision}`}>
+                        {decision.decision === "approved" ? "Approved" : "Rejected"} on{" "}
+                        {new Date(decision.decided_at).toLocaleString()} by {decision.actor}
+                      </div>
+                      {loadingReport && <p className="muted">Preparing report status...</p>}
+                      {report?.status === "rejected_edit_required" && (
+                        <div className="report-status rejected">
+                          {report.message}
+                        </div>
+                      )}
+                      {report?.report_markdown && (
+                        <div className="report-preview">
+                          <div className="checklist-label">Mock discharge/care-transition report</div>
+                          {report.report_path && <p className="muted">Saved to {report.report_path}</p>}
+                          <div
+                            className="plan-rendered"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(report.report_markdown) }}
+                          />
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <>
                       <div className="action-buttons">
