@@ -3,12 +3,22 @@ const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 300
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 
+function newRequestId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function errorWithRequestId(message, requestId) {
+  return new Error(`${message} (Request ID: ${requestId})`);
+}
+
 async function request(path, options = {}) {
   const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const requestId = newRequestId();
   const headers = {
     "Content-Type": "application/json",
+    "X-Request-ID": requestId,
     ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
     ...(fetchOptions.headers || {}),
   };
@@ -21,12 +31,13 @@ async function request(path, options = {}) {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed: ${res.status}`);
+      const responseRequestId = res.headers.get("x-request-id") || body.request_id || headers["X-Request-ID"];
+      throw errorWithRequestId(body.detail || `Request failed: ${res.status}`, responseRequestId);
     }
     return res.json();
   } catch (e) {
     if (e.name === "AbortError") {
-      throw new Error("Request timed out. The API may still be generating a response.");
+      throw errorWithRequestId("Request timed out. The API may still be generating a response.", headers["X-Request-ID"]);
     }
     throw e;
   } finally {

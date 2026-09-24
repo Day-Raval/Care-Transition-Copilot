@@ -37,6 +37,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -104,21 +105,34 @@ _state = {}
 
 
 @app.middleware("http")
-async def api_key_auth(request: Request, call_next):
+async def request_context(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.request_id = request_id
     if request.url.path != "/health" and request.method != "OPTIONS":
         expected_key = os.getenv("API_KEY")
         provided_key = request.headers.get("x-api-key")
         if not expected_key or provided_key != expected_key:
-            return JSONResponse(status_code=401, content={"detail": "Missing or invalid API key"})
-    return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid API key", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled API error path=%s", request.url.path)
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+    logger.exception("Unhandled API error path=%s request_id=%s", request.url.path, request_id)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Unexpected server error. Check the API logs for details."},
+        content={
+            "detail": "Unexpected server error. Check the API logs for details.",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
     )
 
 
