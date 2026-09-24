@@ -100,6 +100,7 @@ class ChatResponse(BaseModel):
 
 class DecisionRequest(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
+    actor: str = Field("demo_clinician", min_length=1, max_length=120)
 
 
 class DecisionRecord(BaseModel):
@@ -107,6 +108,7 @@ class DecisionRecord(BaseModel):
     discharge_ts: str
     decision: str
     decided_at: str
+    actor: str
     draft_plan: str
 
 

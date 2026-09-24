@@ -410,12 +410,14 @@ def decide_patient_plan(patient_id: str, request: DecisionRequest, discharge_ts:
         discharge_ts=episode_discharge_ts,
         decision=request.decision,
         draft_plan=assessment.draft_plan,
+        actor=request.actor,
     )
     log_audit_event(
         "care_plan_decision_recorded",
         patient_id=patient_id,
         discharge_ts=episode_discharge_ts,
         decision=request.decision,
+        actor=request.actor,
     )
     return DecisionRecord(**record)
 

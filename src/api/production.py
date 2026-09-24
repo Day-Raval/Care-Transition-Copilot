@@ -22,6 +22,7 @@ AUDIT_LOG_PATH = RESULTS_DIR / "audit_log.jsonl"
 CARE_PLANS_PATH = RESULTS_DIR / "care_plans.jsonl"
 DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
 CHROMA_PATH = "data/processed/chroma_db"
+DEFAULT_ACTOR = "demo_clinician"
 
 
 def utc_now() -> str:
@@ -73,10 +74,14 @@ def init_decision_db() -> None:
                 discharge_ts TEXT NOT NULL,
                 decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
                 decided_at TEXT NOT NULL,
+                actor TEXT NOT NULL DEFAULT 'demo_clinician',
                 draft_plan TEXT NOT NULL
             )
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(care_plan_decisions)")}
+        if "actor" not in columns:
+            conn.execute("ALTER TABLE care_plan_decisions ADD COLUMN actor TEXT NOT NULL DEFAULT 'demo_clinician'")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_care_plan_decisions_patient_episode
@@ -101,12 +106,19 @@ def init_decision_db() -> None:
         )
 
 
-def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan: str) -> dict[str, Any]:
+def save_decision(
+    patient_id: str,
+    discharge_ts: str,
+    decision: str,
+    draft_plan: str,
+    actor: str = DEFAULT_ACTOR,
+) -> dict[str, Any]:
     record = {
         "patient_id": patient_id,
         "discharge_ts": discharge_ts,
         "decision": decision,
         "decided_at": utc_now(),
+        "actor": actor,
         "draft_plan": draft_plan,
     }
     init_decision_db()
@@ -114,12 +126,13 @@ def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan:
         conn.execute(
             """
             INSERT INTO care_plan_decisions
-                (patient_id, discharge_ts, decision, decided_at, draft_plan)
+                (patient_id, discharge_ts, decision, decided_at, actor, draft_plan)
             VALUES
-                (:patient_id, :discharge_ts, :decision, :decided_at, :draft_plan)
+                (:patient_id, :discharge_ts, :decision, :decided_at, :actor, :draft_plan)
             ON CONFLICT(patient_id, discharge_ts) DO UPDATE SET
                 decision = excluded.decision,
                 decided_at = excluded.decided_at,
+                actor = excluded.actor,
                 draft_plan = excluded.draft_plan
             """,
             record,
@@ -130,7 +143,7 @@ def save_decision(patient_id: str, discharge_ts: str, decision: str, draft_plan:
 def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[str, Any] | None:
     init_decision_db()
     sql = """
-        SELECT patient_id, discharge_ts, decision, decided_at, draft_plan
+        SELECT patient_id, discharge_ts, decision, decided_at, actor, draft_plan
         FROM care_plan_decisions
         WHERE patient_id = ?
     """

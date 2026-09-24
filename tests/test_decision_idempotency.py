@@ -14,8 +14,8 @@ class DecisionIdempotencyTest(unittest.TestCase):
             production.RESULTS_DIR = Path(tmpdir)
             production.DECISIONS_DB_PATH = Path(tmpdir) / "decisions.sqlite3"
             try:
-                production.save_decision("patient-1", "2026-09-24", "approved", "first")
-                production.save_decision("patient-1", "2026-09-24", "rejected", "second")
+                production.save_decision("patient-1", "2026-09-24", "approved", "first", actor="nurse_a")
+                production.save_decision("patient-1", "2026-09-24", "rejected", "second", actor="physician_b")
 
                 latest = production.latest_decision("patient-1", "2026-09-24")
                 with sqlite3.connect(production.DECISIONS_DB_PATH) as conn:
@@ -23,6 +23,7 @@ class DecisionIdempotencyTest(unittest.TestCase):
 
                 self.assertEqual(count, 1)
                 self.assertEqual(latest["decision"], "rejected")
+                self.assertEqual(latest["actor"], "physician_b")
                 self.assertEqual(latest["draft_plan"], "second")
             finally:
                 production.RESULTS_DIR = original_results_dir
