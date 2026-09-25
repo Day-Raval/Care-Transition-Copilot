@@ -123,6 +123,7 @@ comparison becomes possible at the current ~2% event rate.
 | `results/experiments.csv` | Every logged training run, comparable side by side |
 | `models/*.joblib` | Saved model files, one per logged run (gitignored — regenerable) |
 | `results/decisions.sqlite3` | Local approve/reject decisions for generated care plans (gitignored) |
+| `results/care_plans.jsonl` / `results/audit_log.jsonl` | Local saved care-plan and audit-event logs; database mode routes these records to SQL tables instead |
 | `results/fairness_audit_*.txt` | Timestamped fairness audit reports |
 
 ---
@@ -396,6 +397,8 @@ gaps that were previously obvious in local testing.
 - Added file-based audit logging to `results/audit_log.jsonl`.
 - Added file-based saved care plans to `results/care_plans.jsonl`.
 - Added SQLite-backed care-plan decision storage in `results/decisions.sqlite3`.
+- Added optional SQL-backed persistence for decisions, saved care plans, and
+  audit events when `PERSISTENCE_BACKEND=database` and `DATABASE_URL` are set.
 - Added request tracing with `X-Request-ID`, echoed by the API and shown in web
   error messages so demo failures can be matched to server logs.
 - Added `GET /care-plans` to inspect saved generated plans.
@@ -499,6 +502,31 @@ Edit remains intentionally unwired in this pass. Rejected drafts are clearly
 marked for edit and resubmission, but the current backend stores only final
 `approved` or `rejected` decisions, not edited plan text.
 
+## Latest Persistence Update - Database Backend and Clinician Attribution
+
+**Status: Optional SQL persistence path added and covered by tests.**
+
+The local MVP still defaults to JSONL audit/care-plan logs plus
+`results/decisions.sqlite3`, but persistence can now be switched to a SQL
+database by setting `PERSISTENCE_BACKEND=database` and `DATABASE_URL`. The same
+API functions write decision records, saved care plans, and audit events in
+either mode, so the web/API layer does not need a separate code path.
+
+### What was added
+
+| Addition | Current behavior |
+|---|---|
+| Persistence backend switch | `PERSISTENCE_BACKEND=local` keeps the original JSONL/SQLite demo path; `database`, `postgres`, or `postgresql` enables SQLAlchemy-backed storage |
+| Database tables | Database mode creates `care_plan_decisions`, `care_plans`, and `audit_events` tables |
+| Decision upsert | Approve/reject decisions remain idempotent per `patient_id + discharge_ts` in both local and database modes |
+| Saved care-plan reads | `GET /care-plans` now reads from the selected persistence backend instead of assuming JSONL |
+| Clinician attribution | The web client sends `X-Clinician-ID` and includes the same actor in decision writes, defaulting to `demo_clinician` |
+| Health check | `/health` now reports whether `DATABASE_URL` is present when database persistence is requested |
+| Tests | `tests/test_decision_idempotency.py` covers local SQLite idempotency plus database-backed decision and care-plan persistence |
+
+This is a persistence-path upgrade, not full production identity. The actor is
+still a configured clinician label, not an authenticated RBAC principal.
+
 ## Next steps
 
 1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
@@ -525,7 +553,7 @@ marked for edit and resubmission, but the current backend stores only final
    excerpts.
 11. ~~Wire clinician approve/reject actions to real backend state~~ — **Done.**
    Edit remains open.
-12. Next up: replace local JSONL/SQLite persistence with managed database
-   tables.
+12. ~~Add a database-backed persistence path for decisions, saved care plans,
+   and audit events~~ - **Done.** Managed deployment/migrations are still open.
 13. Next up: add true authentication/RBAC and FHIR write-back/notification
    stubs.

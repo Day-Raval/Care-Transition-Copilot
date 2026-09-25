@@ -52,8 +52,8 @@ section-aware note chunking, vector-store indexing, risk-model API,
 risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
 critique agent, risk-gated LangGraph orchestration, free-form tool-calling chat
 agent, a React clinician UI, API-key protection, cached episode-specific
-assessments, file-based audit logging, saved draft care-plan persistence, and
-SQLite-backed approve/reject decisions. Full EHR write-back, production
+assessments, configurable local-or-database persistence, saved draft care-plan
+records, and approve/reject decisions. Full EHR write-back, production
 identity/RBAC, and managed platform services are still planned work.
 
 ```mermaid
@@ -154,9 +154,9 @@ flowchart TB
   resubmission.
 - **Implemented production safeguards** - the API has safe error handling,
   health dependency reporting, required API-key protection, request timeouts,
-  cached assessment generation, file-based audit logging, saved draft care-plan
-  records, request tracing, idempotent SQLite-backed care-plan decisions, and
-  actor tracking for clinician actions.
+  cached assessment generation, file-based or SQL-backed audit/care-plan
+  persistence, request tracing, idempotent care-plan decisions, and actor
+  tracking for clinician actions.
 - **Planned platform services** - OAuth2/RBAC, managed database persistence,
   CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
   notification delivery remain future hardening work.
@@ -271,7 +271,8 @@ The current repository shows the first stage of the MVP working locally:
 - Added request tracing with `X-Request-ID` across the API and web client so UI
   errors can be matched to server logs. Care-plan decisions are now idempotent
   per patient episode and store the acting clinician label, defaulting to
-  `demo_clinician` until real auth/RBAC is added.
+  `demo_clinician` until real auth/RBAC is added. Persistence can run in local
+  JSONL/SQLite mode or SQL-backed database mode.
 - Added approved mock care-transition reports. `GET /patients/{id}/report`
   returns an approved Markdown report and saves it under `reports/` with public
   demo naming such as `care-transition-report__2026-08-09__994d6249.md`.
@@ -337,8 +338,8 @@ Latest agent-orchestration summary:
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
-| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, request IDs, cached assessments, audit JSONL, saved care-plan JSONL, idempotent SQLite decisions, and approved report export |
-| React clinician UI | Risk queue, Patients, Care plans, Ask a question, decision badges with actor labels, approved report preview, and rejected edit-required status |
+| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, request IDs, cached assessments, local JSONL/SQLite or SQL-backed persistence, idempotent decisions, and approved report export |
+| React clinician UI | Risk queue, Patients, Care plans, Ask a question, configurable clinician ID, decision badges with actor labels, approved report preview, and rejected edit-required status |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -381,9 +382,10 @@ patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
 categories, grounded care-plan drafting, second-model critique, risk-gated
 LangGraph orchestration, an auditable tool-calling chat agent, API-key protected
 serving, cached episode-specific assessment generation, approve/reject decision
-persistence, request tracing, idempotent actor-labeled decisions, approved
-care-transition report export, and a React UI with risk queue, Patients, Care
-plans, Ask a question routes, dashboard clinician decision controls, and report
+persistence with local or SQL-backed storage, request tracing, idempotent
+actor-labeled decisions, approved care-transition report export, and a React UI
+with risk queue, Patients, Care plans, Ask a question routes, dashboard
+clinician decision controls, configurable clinician ID, and report
 preview/status.
 
 The current modeling work is still diagnostic rather than production-ready. The
@@ -493,8 +495,10 @@ and care-plan drafting can take longer than ordinary API reads.
 
 Local demo persistence uses JSONL files plus SQLite. To route decisions, saved
 care plans, and audit events through a SQL database instead, set
-`PERSISTENCE_BACKEND=database` and `DATABASE_URL=postgresql://...`. The React
-app sends clinician attribution with `VITE_CLINICIAN_ID`.
+`PERSISTENCE_BACKEND=database` and `DATABASE_URL=postgresql://...`. Database
+mode creates `care_plan_decisions`, `care_plans`, and `audit_events` tables on
+startup. The React app sends clinician attribution with `VITE_CLINICIAN_ID`,
+which defaults to `demo_clinician`.
 
 ### API smoke tests
 
@@ -613,8 +617,14 @@ python -m src.agents.chat_agent "For patient <patient_id>, what medications and 
 
 ### Running tests
 
-Automated tests have not been added yet. Current validation is done through the
-analysis scripts above and manual inspection of sample inpatient bundles.
+```bash
+python -m unittest tests.test_decision_idempotency
+```
+
+The current automated test covers idempotent decision writes for both local
+SQLite persistence and the SQL-backed database path, including saved care-plan
+reads. The modeling and retrieval checks are still run through the analysis
+scripts above.
 
 ## Project structure
 
@@ -682,7 +692,7 @@ or data use agreement is required to run or demo it. See
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
-| Implemented API | FastAPI, Uvicorn, Pydantic, API-key auth, request tracing, assessment cache, file-based audit/care-plan logs, idempotent SQLite decision records, Markdown report export |
+| Implemented API | FastAPI, Uvicorn, Pydantic, SQLAlchemy, API-key auth, request tracing, assessment cache, local JSONL/SQLite or SQL-backed persistence, Markdown report export |
 | Implemented frontend | React, Vite, React Router |
 | Planned data services | Postgres, Redis, Kafka |
 | Planned notifications | Twilio or patient portal stub |
