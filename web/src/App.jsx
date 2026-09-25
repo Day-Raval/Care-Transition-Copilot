@@ -3,6 +3,7 @@ import Dashboard from "./components/Dashboard.jsx";
 import ChatInterface from "./components/ChatInterface.jsx";
 import Patients from "./components/Patients.jsx";
 import CarePlans from "./components/CarePlans.jsx";
+import { getClinicianId } from "./api.js";
 
 const NAV_ITEMS = [
   { label: "Risk queue", path: "/", enabled: true },
@@ -44,7 +45,7 @@ export default function App() {
     <BrowserRouter>
       <div className="topbar">
         <div className="topbar-title">Care Transition Copilot</div>
-        <div className="topbar-user">Demo User</div>
+        <div className="topbar-user">{getClinicianId()}</div>
       </div>
       <div className="app-shell">
         <Sidebar />

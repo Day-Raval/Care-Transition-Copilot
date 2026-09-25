@@ -53,12 +53,12 @@ load_dotenv()  # must run before /assessment or /chat are ever called —
 sys.path.insert(0, ".")
 from src.api.drift_monitor import compute_drift_report, log_prediction
 from src.api.production import (
-    CARE_PLANS_PATH,
+    DEFAULT_ACTOR,
     build_transition_report,
     init_decision_db,
     latest_decision,
     log_audit_event,
-    read_jsonl,
+    read_care_plans,
     runtime_dependency_report,
     save_care_plan,
     save_decision,
@@ -152,6 +152,11 @@ def _cache_ttl_seconds() -> int:
         return max(0, int(os.getenv("CACHE_TTL_SECONDS", "600")))
     except ValueError:
         return 600
+
+
+def _clinician_actor(request: Request, fallback: str | None = None) -> str:
+    actor = request.headers.get("x-clinician-id") or fallback or DEFAULT_ACTOR
+    return actor.strip() or DEFAULT_ACTOR
 
 
 def _latest_discharge_ts(patient_id: str, discharge_ts: str | None = None) -> str:
@@ -401,26 +406,32 @@ def patient_decision(patient_id: str, discharge_ts: str | None = None):
 
 
 @app.post("/patients/{patient_id}/decision", response_model=DecisionRecord)
-def decide_patient_plan(patient_id: str, request: DecisionRequest, discharge_ts: str | None = None):
+def decide_patient_plan(
+    patient_id: str,
+    decision_request: DecisionRequest,
+    http_request: Request,
+    discharge_ts: str | None = None,
+):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
     episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
     assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
     if assessment is None:
         assessment = _generate_assessment(patient_id, episode_discharge_ts)
+    actor = _clinician_actor(http_request, decision_request.actor)
     record = save_decision(
         patient_id=patient_id,
         discharge_ts=episode_discharge_ts,
-        decision=request.decision,
+        decision=decision_request.decision,
         draft_plan=assessment.draft_plan,
-        actor=request.actor,
+        actor=actor,
     )
     log_audit_event(
         "care_plan_decision_recorded",
         patient_id=patient_id,
         discharge_ts=episode_discharge_ts,
-        decision=request.decision,
-        actor=request.actor,
+        decision=decision_request.decision,
+        actor=actor,
     )
     return DecisionRecord(**record)
 
@@ -464,7 +475,7 @@ def patient_report(patient_id: str, discharge_ts: str | None = None):
 
 @app.get("/care-plans")
 def saved_care_plans(limit: int = 50):
-    return read_jsonl(CARE_PLANS_PATH, limit=limit)
+    return read_care_plans(limit=limit)
 
 
 @app.post("/chat", response_model=ChatResponse)

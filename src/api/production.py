@@ -1,9 +1,8 @@
 """
 Small production-readiness helpers for the API layer.
 
-These stay intentionally file-based because this project is still a
-portfolio/demo app. They give us auditability and saved generated plans
-without introducing a database before the app needs one.
+These keep the local file/SQLite demo path, and switch to SQL-backed
+tables when PERSISTENCE_BACKEND=database and DATABASE_URL are set.
 """
 
 from __future__ import annotations
@@ -16,6 +15,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    text,
+)
+from sqlalchemy.engine import Engine
+
 from src.utils.config import Config
 
 RESULTS_DIR = Path("results")
@@ -25,16 +38,76 @@ DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
 REPORTS_DIR = Path("reports")
 CHROMA_PATH = "data/processed/chroma_db"
 DEFAULT_ACTOR = "demo_clinician"
+DATABASE_BACKENDS = {"database", "postgres", "postgresql"}
+
+_engine: Engine | None = None
+_metadata = MetaData()
+
+_decisions_table = Table(
+    "care_plan_decisions",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("patient_id", String, nullable=False),
+    Column("discharge_ts", String, nullable=False),
+    Column("decision", String, nullable=False),
+    Column("decided_at", String, nullable=False),
+    Column("actor", String, nullable=False, default=DEFAULT_ACTOR),
+    Column("draft_plan", Text, nullable=False),
+    CheckConstraint("decision IN ('approved', 'rejected')", name="ck_care_plan_decisions_decision"),
+    UniqueConstraint("patient_id", "discharge_ts", name="uq_care_plan_decisions_episode"),
+)
+
+_audit_events_table = Table(
+    "audit_events",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("event_type", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+
+_care_plans_table = Table(
+    "care_plans",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("patient_id", String, nullable=True),
+    Column("discharge_ts", String, nullable=True),
+    Column("payload_json", Text, nullable=False),
+)
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def database_requested() -> bool:
+    return os.getenv("PERSISTENCE_BACKEND", "").strip().lower() in DATABASE_BACKENDS
+
+
+def use_database() -> bool:
+    if not database_requested():
+        return False
+    if not os.getenv("DATABASE_URL"):
+        raise RuntimeError("PERSISTENCE_BACKEND=database requires DATABASE_URL")
+    return True
+
+
+def _db_engine() -> Engine:
+    global _engine
+    if _engine is None:
+        _engine = create_engine(os.environ["DATABASE_URL"], future=True)
+    return _engine
+
+
+def _json_dumps(record: dict[str, Any]) -> str:
+    return json.dumps(record, ensure_ascii=True, default=str)
+
+
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=True, default=str) + "\n")
+        f.write(_json_dumps(record) + "\n")
 
 
 def read_jsonl(path: Path, limit: int = 100) -> list[dict[str, Any]]:
@@ -51,18 +124,55 @@ def read_jsonl(path: Path, limit: int = 100) -> list[dict[str, Any]]:
 
 
 def log_audit_event(event_type: str, **payload: Any) -> None:
-    append_jsonl(
-        AUDIT_LOG_PATH,
-        {
-            "timestamp": utc_now(),
-            "event_type": event_type,
-            **payload,
-        },
-    )
+    record = {"timestamp": utc_now(), "event_type": event_type, **payload}
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _audit_events_table.insert().values(
+                    timestamp=record["timestamp"],
+                    event_type=event_type,
+                    payload_json=_json_dumps(record),
+                )
+            )
+        return
+    append_jsonl(AUDIT_LOG_PATH, record)
 
 
 def save_care_plan(record: dict[str, Any]) -> None:
-    append_jsonl(CARE_PLANS_PATH, {"timestamp": utc_now(), **record})
+    saved = {"timestamp": utc_now(), **record}
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _care_plans_table.insert().values(
+                    timestamp=saved["timestamp"],
+                    patient_id=saved.get("patient_id"),
+                    discharge_ts=saved.get("discharge_ts"),
+                    payload_json=_json_dumps(saved),
+                )
+            )
+        return
+    append_jsonl(CARE_PLANS_PATH, saved)
+
+
+def read_care_plans(limit: int = 100) -> list[dict[str, Any]]:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM care_plans
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            return [json.loads(row.payload_json) for row in rows]
+    return read_jsonl(CARE_PLANS_PATH, limit=limit)
 
 
 def medication_context(summary: str) -> str:
@@ -111,6 +221,10 @@ def save_transition_report(patient_id: str, discharge_ts: str, report_markdown: 
 
 
 def init_decision_db() -> None:
+    if use_database():
+        _metadata.create_all(_db_engine())
+        return
+
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DECISIONS_DB_PATH) as conn:
         conn.execute(
@@ -160,6 +274,7 @@ def save_decision(
     draft_plan: str,
     actor: str = DEFAULT_ACTOR,
 ) -> dict[str, Any]:
+    actor = (actor or DEFAULT_ACTOR).strip() or DEFAULT_ACTOR
     record = {
         "patient_id": patient_id,
         "discharge_ts": discharge_ts,
@@ -169,6 +284,26 @@ def save_decision(
         "draft_plan": draft_plan,
     }
     init_decision_db()
+    if use_database():
+        with _db_engine().begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO care_plan_decisions
+                        (patient_id, discharge_ts, decision, decided_at, actor, draft_plan)
+                    VALUES
+                        (:patient_id, :discharge_ts, :decision, :decided_at, :actor, :draft_plan)
+                    ON CONFLICT(patient_id, discharge_ts) DO UPDATE SET
+                        decision = excluded.decision,
+                        decided_at = excluded.decided_at,
+                        actor = excluded.actor,
+                        draft_plan = excluded.draft_plan
+                    """
+                ),
+                record,
+            )
+        return record
+
     with sqlite3.connect(DECISIONS_DB_PATH) as conn:
         conn.execute(
             """
@@ -192,17 +327,24 @@ def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[st
     sql = """
         SELECT patient_id, discharge_ts, decision, decided_at, actor, draft_plan
         FROM care_plan_decisions
-        WHERE patient_id = ?
+        WHERE patient_id = :patient_id
     """
-    params: list[Any] = [patient_id]
+    params: dict[str, Any] = {"patient_id": patient_id}
     if discharge_ts is not None:
-        sql += " AND discharge_ts = ?"
-        params.append(discharge_ts)
+        sql += " AND discharge_ts = :discharge_ts"
+        params["discharge_ts"] = discharge_ts
     sql += " ORDER BY decided_at DESC, id DESC LIMIT 1"
 
+    if use_database():
+        with _db_engine().connect() as conn:
+            row = conn.execute(text(sql), params).mappings().first()
+        return dict(row) if row else None
+
+    sqlite_sql = sql.replace(":patient_id", "?").replace(":discharge_ts", "?")
+    sqlite_params = [patient_id] + ([discharge_ts] if discharge_ts is not None else [])
     with sqlite3.connect(DECISIONS_DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(sql, params).fetchone()
+        row = conn.execute(sqlite_sql, sqlite_params).fetchone()
     return dict(row) if row else None
 
 
@@ -213,6 +355,7 @@ def runtime_dependency_report(cfg: Config) -> dict[str, Any]:
         "processed_dataset": os.path.exists(target_csv),
         "groq_api_key": bool(os.getenv("GROQ_API_KEY")),
         "vector_store": os.path.exists(CHROMA_PATH),
+        "database_url": not database_requested() or bool(os.getenv("DATABASE_URL")),
     }
     missing = [name for name, ok in checks.items() if not ok]
     return {

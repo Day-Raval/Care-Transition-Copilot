@@ -491,6 +491,11 @@ runtime variables include `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`,
 a longer frontend timeout through `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval
 and care-plan drafting can take longer than ordinary API reads.
 
+Local demo persistence uses JSONL files plus SQLite. To route decisions, saved
+care plans, and audit events through a SQL database instead, set
+`PERSISTENCE_BACKEND=database` and `DATABASE_URL=postgresql://...`. The React
+app sends clinician attribution with `VITE_CLINICIAN_ID`.
+
 ### API smoke tests
 
 After starting the API with `uvicorn src.api.main:app --reload --port 8080`,

@@ -2,6 +2,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const API_KEY = import.meta.env.VITE_API_KEY || "";
+const CLINICIAN_ID = import.meta.env.VITE_CLINICIAN_ID || "demo_clinician";
 
 function newRequestId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -19,6 +20,7 @@ async function request(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
     "X-Request-ID": requestId,
+    "X-Clinician-ID": CLINICIAN_ID,
     ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
     ...(fetchOptions.headers || {}),
   };
@@ -65,7 +67,7 @@ export function saveDecision(patientId, dischargeTs, decision) {
   const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
   return request(`/patients/${patientId}/decision${params}`, {
     method: "POST",
-    body: JSON.stringify({ decision }),
+    body: JSON.stringify({ decision, actor: CLINICIAN_ID }),
   });
 }
 
@@ -87,4 +89,8 @@ export function sendChatMessage(question) {
 
 export function getModelInfo() {
   return request("/model-info");
+}
+
+export function getClinicianId() {
+  return CLINICIAN_ID;
 }
