@@ -500,6 +500,10 @@ mode creates `care_plan_decisions`, `care_plans`, and `audit_events` tables on
 startup. The React app sends clinician attribution with `VITE_CLINICIAN_ID`,
 which defaults to `demo_clinician`.
 
+See `database/README.md` for connection-check and one-time migration scripts
+that move existing local JSONL/SQLite data and `discharge_records_with_target.csv`
+into Postgres.
+
 ### API smoke tests
 
 After starting the API with `uvicorn src.api.main:app --reload --port 8080`,
@@ -669,6 +673,12 @@ results/
 |-- experiments.csv                # Logged training runs
 |-- decisions.sqlite3              # Local approve/reject care-plan decisions, gitignored
 `-- fairness_audit_*.txt           # Timestamped fairness-audit reports
+
+database/
+|-- README.md              # Postgres workflow notes
+|-- check_connection.py    # Loads .env and verifies Postgres connectivity
+|-- migrate_to_postgres.py # Migrates local JSONL/SQLite/CSV data into Postgres
+`-- verify_migration.py    # Row-by-row check that migrated data matches Postgres
 
 reports/
 |-- README.md                      # Demo report-folder notes
