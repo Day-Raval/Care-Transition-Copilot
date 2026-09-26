@@ -3,7 +3,7 @@ import Dashboard from "./components/Dashboard.jsx";
 import ChatInterface from "./components/ChatInterface.jsx";
 import Patients from "./components/Patients.jsx";
 import CarePlans from "./components/CarePlans.jsx";
-import { getClinicianId } from "./api.js";
+import { AuthProvider, useAuth } from "./AuthContext.jsx";
 
 const NAV_ITEMS = [
   { label: "Risk queue", path: "/", enabled: true },
@@ -43,9 +43,42 @@ function Sidebar() {
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
+        <AuthenticatedApp />
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+function AuthenticatedApp() {
+  const { status, error, identity, roles, isOidc, canDecide, signIn, signOut } = useAuth();
+
+  if (status === "loading") {
+    return <main className="auth-gate"><p>Checking sign-in...</p></main>;
+  }
+  if (status === "error" || status === "signed_out") {
+    return (
+      <main className="auth-gate">
+        <div className="auth-panel">
+          <p className="sidebar-label">CARE TRANSITION COPILOT</p>
+          <h1>{status === "error" ? "Sign-in unavailable" : "Sign in"}</h1>
+          {error && <p className="auth-error">{error}</p>}
+          {status === "signed_out" && (
+            <button className="btn approve" onClick={() => signIn()}>Continue with organization sign-in</button>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <>
       <div className="topbar">
         <div className="topbar-title">Care Transition Copilot</div>
-        <div className="topbar-user">{getClinicianId()}</div>
+        <div className="topbar-session">
+          <span className="topbar-user">{identity} · {roles.join(", ")}</span>
+          {isOidc && <button className="btn topbar-signout" onClick={() => signOut()}>Sign out</button>}
+        </div>
       </div>
       <div className="app-shell">
         <Sidebar />
@@ -56,8 +89,9 @@ export default function App() {
             <Route path="/patients" element={<Patients />} />
             <Route path="/care-plans" element={<CarePlans />} />
           </Routes>
+          {!canDecide && <p className="auth-role-note">Read-only access</p>}
         </div>
       </div>
-    </BrowserRouter>
+    </>
   );
 }

@@ -3,6 +3,7 @@ import { getQueue, getAssessment, getDecision, getReport, saveDecision } from ".
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
+import { useAuth } from "../AuthContext.jsx";
 
 function jaccardSimilarity(a, b) {
   const wordsA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
@@ -274,6 +275,7 @@ function buildEvidenceDisplaySections(summary) {
 }
 
 export default function Dashboard() {
+  const { canDecide } = useAuth();
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(null);
   const [assessment, setAssessment] = useState(null);
@@ -494,7 +496,7 @@ export default function Dashboard() {
                         </div>
                       )}
                     </>
-                  ) : (
+                  ) : canDecide ? (
                     <>
                       <div className="action-buttons">
                         <button
@@ -515,6 +517,8 @@ export default function Dashboard() {
                       </div>
                       <div className="btn-note">Edit is not wired yet.</div>
                     </>
+                  ) : (
+                    <p className="auth-role-note">A clinician role is required to record a decision.</p>
                   )}
                 </>
               )}

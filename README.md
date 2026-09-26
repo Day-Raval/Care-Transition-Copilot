@@ -161,6 +161,19 @@ flowchart TB
   CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
   notification delivery remain future hardening work.
 
+### Authentication configuration (in-progress)
+
+Local demo mode uses `AUTH_MODE=api_key` and the shared `API_KEY`; it is not an
+identity system. For OIDC, set `AUTH_MODE=oidc` and `VITE_AUTH_MODE=oidc`, then
+configure `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URL`, and the matching
+`VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID`, and `VITE_OIDC_SCOPE` values.
+The identity provider must issue signed RS256 access tokens with the configured
+issuer, API audience, subject, expiry, and a `roles` claim (or the configured
+`OIDC_ROLES_CLAIM`). Assign `care_coordinator`, `clinician`, `data_scientist`,
+or `admin` roles. Add the browser origin to `CORS_ALLOWED_ORIGINS`. In OIDC mode,
+the API derives decision attribution from the verified token subject; the
+shared API key is reserved for service-to-service `/predict` requests.
+
 ## Application scope
 
 The MVP focuses on four user-facing capabilities:

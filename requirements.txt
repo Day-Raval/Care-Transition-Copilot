@@ -16,3 +16,4 @@ scikit-survival
 groq
 requests
 redis
+PyJWT[crypto]

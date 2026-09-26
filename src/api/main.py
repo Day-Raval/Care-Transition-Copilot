@@ -41,6 +41,7 @@ import threading
 import time
 import uuid
 
+import jwt
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -66,6 +67,7 @@ from src.api.production import (
     save_decision,
     save_transition_report,
 )
+from src.api.security import OIDCConfigurationError, required_roles, verify_oidc_access_token
 from src.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -99,11 +101,20 @@ app = FastAPI(
     version="0.3.0",
 )
 
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite dev server
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID", "X-Clinician-ID"],
 )
 
 _state = {}
@@ -114,15 +125,73 @@ _redis_cache = None
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     request.state.request_id = request_id
-    if request.url.path != "/health" and request.method != "OPTIONS":
-        expected_key = os.getenv("API_KEY")
-        provided_key = request.headers.get("x-api-key")
+    path = request.url.path
+    method = request.method
+    if path == "/health" or method == "OPTIONS":
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    auth_mode = os.getenv("AUTH_MODE", "api_key").strip().lower()
+    expected_key = os.getenv("API_KEY")
+    provided_key = request.headers.get("x-api-key")
+    if auth_mode == "oidc" and path == "/predict":
+        if not expected_key or provided_key != expected_key:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid service API key", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+        request.state.principal = {"sub": "risk_model_service", "roles": [], "auth_mode": "service"}
+    elif auth_mode == "oidc":
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "A bearer access token is required", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+        try:
+            request.state.principal = verify_oidc_access_token(token)
+        except OIDCConfigurationError as exc:
+            logger.error("OIDC authentication is misconfigured: %s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "OIDC authentication is not configured", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+        except (jwt.InvalidTokenError, jwt.PyJWKClientError, ValueError):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired bearer access token", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+        allowed_roles = required_roles(method, path)
+        if allowed_roles is not None and not allowed_roles.intersection(request.state.principal["roles"]):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Your role is not authorized for this action", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+    elif auth_mode == "api_key":
         if not expected_key or provided_key != expected_key:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Missing or invalid API key", "request_id": request_id},
                 headers={"X-Request-ID": request_id},
             )
+        request.state.principal = {
+            "sub": request.headers.get("x-clinician-id", DEFAULT_ACTOR),
+            "roles": ["admin"],
+            "auth_mode": "api_key",
+        }
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "AUTH_MODE must be 'api_key' or 'oidc'", "request_id": request_id},
+            headers={"X-Request-ID": request_id},
+        )
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
@@ -184,8 +253,11 @@ def _redis_cache_client():
     return _redis_cache
 
 
-def _clinician_actor(request: Request, fallback: str | None = None) -> str:
-    actor = request.headers.get("x-clinician-id") or fallback or DEFAULT_ACTOR
+def _clinician_actor(request: Request) -> str:
+    principal = getattr(request.state, "principal", {})
+    if principal.get("auth_mode") == "oidc":
+        return principal["sub"]
+    actor = request.headers.get("x-clinician-id") or DEFAULT_ACTOR
     return actor.strip() or DEFAULT_ACTOR
 
 
@@ -473,7 +545,7 @@ def decide_patient_plan(
     assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
     if assessment is None:
         assessment = _generate_assessment(patient_id, episode_discharge_ts)
-    actor = _clinician_actor(http_request, decision_request.actor)
+    actor = _clinician_actor(http_request)
     record = save_decision(
         patient_id=patient_id,
         discharge_ts=episode_discharge_ts,
