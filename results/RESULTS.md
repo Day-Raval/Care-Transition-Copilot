@@ -388,12 +388,12 @@ gaps that were previously obvious in local testing.
   controlled error message while the server logs the traceback.
 - Added dependency-aware `/health` output so setup problems such as missing
   processed data, vector store, production run id, or Groq key are visible.
-- Added required API-key protection for non-health endpoints through `API_KEY`
+- Added required API-key protection for local demo mode through `API_KEY`
   and the `X-API-Key` request header.
 - Added episode-specific assessment support through the optional `discharge_ts`
   query parameter, so repeat patients are not collapsed to patient ID alone.
-- Added an in-process assessment cache controlled by `CACHE_TTL_SECONDS` to
-  avoid regenerating the same LLM-backed assessment on every dashboard click.
+- Added an assessment cache controlled by `CACHE_TTL_SECONDS` to avoid
+  regenerating the same LLM-backed assessment on every dashboard click.
 - Added file-based audit logging to `results/audit_log.jsonl`.
 - Added file-based saved care plans to `results/care_plans.jsonl`.
 - Added SQLite-backed care-plan decision storage in `results/decisions.sqlite3`.
@@ -405,7 +405,7 @@ gaps that were previously obvious in local testing.
 - Added `GET` and `POST /patients/{patient_id}/decision` for retrieving and
   recording the latest approve/reject decision for a patient episode.
 - Made care-plan decisions idempotent per `patient_id + discharge_ts`, with
-  actor tracking (`demo_clinician` by default until real auth/RBAC exists).
+  actor tracking (`demo_clinician` in API-key mode; token subject in OIDC mode).
 - Added approved mock care-transition report generation through
   `GET /patients/{patient_id}/report`. Approved reports are saved under
   `reports/` using public demo filenames such as
@@ -524,8 +524,36 @@ either mode, so the web/API layer does not need a separate code path.
 | Health check | `/health` now reports whether `DATABASE_URL` is present when database persistence is requested |
 | Tests | `tests/test_decision_idempotency.py` covers local SQLite idempotency plus database-backed decision and care-plan persistence |
 
-This is a persistence-path upgrade, not full production identity. The actor is
-still a configured clinician label, not an authenticated RBAC principal.
+This persistence pass added the storage switch first; the later OIDC pass below
+adds authenticated user attribution and role checks at the API boundary.
+
+## Latest Security and Runtime Update - OIDC, Redis Cache, and Postgres Tools
+
+**Status: Security/runtime hardening added for the local MVP.**
+
+The API can now run in either local API-key mode or OIDC user-access mode.
+`AUTH_MODE=api_key` keeps the original shared-key demo path. `AUTH_MODE=oidc`
+requires bearer access tokens signed with the configured JWKS, issuer, audience,
+subject, expiry, and roles claim. Route-level role checks gate patient data,
+care plans, chat, decisions, approved reports, drift reports, and model
+metadata. The `/predict` endpoint remains service-to-service in OIDC mode and
+still requires the shared `API_KEY`.
+
+### What was added
+
+| Addition | Current behavior |
+|---|---|
+| OIDC verification | `src/api/security.py` validates RS256 access tokens using `OIDC_ISSUER`, `OIDC_AUDIENCE`, and `OIDC_JWKS_URL` |
+| Role-based route checks | `care_coordinator`, `clinician`, `data_scientist`, and `admin` roles authorize only the matching API actions |
+| OIDC web client | The React app can run with `VITE_AUTH_MODE=oidc`, sign users in/out, and attach bearer tokens to API requests |
+| Decision attribution | API-key mode keeps `X-Clinician-ID`; OIDC mode records the verified token subject as the actor |
+| Redis assessment cache | Setting `REDIS_URL` stores episode assessment cache entries in Redis using `CACHE_TTL_SECONDS`; Redis failures fall back to the in-process cache |
+| Postgres migration tooling | `database/check_PostgresConnection.py`, `database/migrate_to_postgres.py`, and `database/verify_migration.py` move and verify local JSONL/SQLite/CSV data in Postgres |
+| Tests | `tests/test_api_security.py` covers OIDC token validation, role enforcement, and decision attribution behavior |
+
+This is still not full clinical production readiness. It proves the app boundary
+can enforce identity and roles, but deployment-specific identity-provider setup,
+managed secrets, monitoring, and incident operations remain future work.
 
 ## Next steps
 
@@ -554,6 +582,9 @@ still a configured clinician label, not an authenticated RBAC principal.
 11. ~~Wire clinician approve/reject actions to real backend state~~ — **Done.**
    Edit remains open.
 12. ~~Add a database-backed persistence path for decisions, saved care plans,
-   and audit events~~ - **Done.** Managed deployment/migrations are still open.
-13. Next up: add true authentication/RBAC and FHIR write-back/notification
-   stubs.
+   and audit events~~ - **Done.** Managed deployment hardening is still open.
+13. ~~Add true authentication/RBAC~~ - **First pass done.** OIDC bearer-token
+   verification and role checks are implemented; production identity-provider
+   setup and operations hardening remain open.
+14. Next up: add FHIR write-back/notification stubs and harden managed
+   deployment operations.

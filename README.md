@@ -51,10 +51,12 @@ target-labeling, baseline/model-comparison, experiment registry, fairness-audit,
 section-aware note chunking, vector-store indexing, risk-model API,
 risk-model-to-agent integration, dynamic retrieval categories, reasoning agent,
 critique agent, risk-gated LangGraph orchestration, free-form tool-calling chat
-agent, a React clinician UI, API-key protection, cached episode-specific
-assessments, configurable local-or-database persistence, saved draft care-plan
-records, and approve/reject decisions. Full EHR write-back, production
-identity/RBAC, and managed platform services are still planned work.
+agent, a React clinician UI, API-key or OIDC bearer-token protection,
+episode-specific assessments cached in memory or Redis, configurable
+local-or-database persistence, Postgres migration/verification scripts, saved
+draft care-plan records, and approve/reject decisions. Full EHR write-back,
+notification delivery, managed deployments, and production monitoring are still
+planned work.
 
 ```mermaid
 flowchart TB
@@ -153,15 +155,16 @@ flowchart TB
   mock care-transition reports, while rejected plans remain marked for edit and
   resubmission.
 - **Implemented production safeguards** - the API has safe error handling,
-  health dependency reporting, required API-key protection, request timeouts,
-  cached assessment generation, file-based or SQL-backed audit/care-plan
-  persistence, request tracing, idempotent care-plan decisions, and actor
-  tracking for clinician actions.
-- **Planned platform services** - OAuth2/RBAC, managed database persistence,
-  CI/CD, production monitoring, retries, circuit breakers, FHIR write-back, and
-  notification delivery remain future hardening work.
+  health dependency reporting, required API-key protection for local demo mode,
+  OIDC bearer-token verification with role checks for user access, request
+  timeouts, cached assessment generation with optional Redis backing,
+  file-based or SQL-backed audit/care-plan persistence, request tracing,
+  idempotent care-plan decisions, and actor tracking for clinician actions.
+- **Planned platform services** - managed deployment, CI/CD, production
+  monitoring, retries, circuit breakers, FHIR write-back, and notification
+  delivery remain future hardening work.
 
-### Authentication configuration (in-progress)
+### Authentication configuration
 
 Local demo mode uses `AUTH_MODE=api_key` and the shared `API_KEY`; it is not an
 identity system. For OIDC, set `AUTH_MODE=oidc` and `VITE_AUTH_MODE=oidc`, then
@@ -172,7 +175,9 @@ issuer, API audience, subject, expiry, and a `roles` claim (or the configured
 `OIDC_ROLES_CLAIM`). Assign `care_coordinator`, `clinician`, `data_scientist`,
 or `admin` roles. Add the browser origin to `CORS_ALLOWED_ORIGINS`. In OIDC mode,
 the API derives decision attribution from the verified token subject; the
-shared API key is reserved for service-to-service `/predict` requests.
+shared API key is reserved for service-to-service `/predict` requests. Role
+checks gate model metadata, drift reports, patient lists, care plans, chat,
+decisions, and approved report access.
 
 ## Application scope
 
@@ -270,22 +275,23 @@ The current repository shows the first stage of the MVP working locally:
   "discharge summary."
 - Added production-readiness helpers around the API: safe unhandled-error
   responses, required `API_KEY` protection for non-health endpoints, `/health`
-  dependency checks, configurable LLM/risk-API timeouts, file-based audit
-  logging in `results/audit_log.jsonl`, and saved generated care plans in
-  `results/care_plans.jsonl`.
+  dependency checks, OIDC bearer-token verification with role-based route
+  checks, configurable LLM/risk-API timeouts, optional Redis-backed assessment
+  caching, file-based audit logging in `results/audit_log.jsonl`, and saved
+  generated care plans in `results/care_plans.jsonl`.
 - Added the first React clinician workflow beyond the risk queue:
   `/patients` lists recent discharged patients, `/care-plans` lets a user select
   a patient and generate/view a draft follow-up plan, and `/chat` renders
   assistant answers as formatted notes with visible tool-call audit trails.
 - Added episode-specific assessment and decision APIs. Assessments now accept an
   optional `discharge_ts`, cache generated agent results for the configured
-  `CACHE_TTL_SECONDS`, and the dashboard can record approve/reject decisions to
-  `results/decisions.sqlite3`.
+  `CACHE_TTL_SECONDS` in memory or Redis, and the dashboard can record
+  approve/reject decisions to `results/decisions.sqlite3`.
 - Added request tracing with `X-Request-ID` across the API and web client so UI
   errors can be matched to server logs. Care-plan decisions are now idempotent
-  per patient episode and store the acting clinician label, defaulting to
-  `demo_clinician` until real auth/RBAC is added. Persistence can run in local
-  JSONL/SQLite mode or SQL-backed database mode.
+  per patient episode and store the acting clinician label, using the configured
+  demo clinician ID in API-key mode or the verified token subject in OIDC mode.
+  Persistence can run in local JSONL/SQLite mode or SQL-backed database mode.
 - Added approved mock care-transition reports. `GET /patients/{id}/report`
   returns an approved Markdown report and saves it under `reports/` with public
   demo naming such as `care-transition-report__2026-08-09__994d6249.md`.
@@ -351,8 +357,8 @@ Latest agent-orchestration summary:
 | Critique | Second Groq-hosted model reviews the draft for hallucination, overreach, and missed gaps while respecting the validated risk-assessment line |
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
-| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key, request timeouts, request IDs, cached assessments, local JSONL/SQLite or SQL-backed persistence, idempotent decisions, and approved report export |
-| React clinician UI | Risk queue, Patients, Care plans, Ask a question, configurable clinician ID, decision badges with actor labels, approved report preview, and rejected edit-required status |
+| Production guardrails | Safe API error handling, dependency-aware `/health`, required API key or OIDC bearer token, route-level role checks, request timeouts, request IDs, cached assessments with optional Redis backing, local JSONL/SQLite or SQL-backed persistence, idempotent decisions, and approved report export |
+| React clinician UI | Risk queue, Patients, Care plans, Ask a question, API-key demo mode or OIDC login, configurable clinician ID, decision badges with actor labels, approved report preview, and rejected edit-required status |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -394,12 +400,13 @@ note chunking, ChromaDB vector-store indexing, FastAPI model serving,
 patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
 categories, grounded care-plan drafting, second-model critique, risk-gated
 LangGraph orchestration, an auditable tool-calling chat agent, API-key protected
-serving, cached episode-specific assessment generation, approve/reject decision
-persistence with local or SQL-backed storage, request tracing, idempotent
-actor-labeled decisions, approved care-transition report export, and a React UI
-with risk queue, Patients, Care plans, Ask a question routes, dashboard
-clinician decision controls, configurable clinician ID, and report
-preview/status.
+or OIDC-authenticated serving, cached episode-specific assessment generation
+with optional Redis backing, approve/reject decision persistence with local or
+SQL-backed storage, Postgres migration and verification scripts, request
+tracing, idempotent actor-labeled decisions, approved care-transition report
+export, and a React UI with risk queue, Patients, Care plans, Ask a question
+routes, dashboard clinician decision controls, configurable clinician ID, OIDC
+login/logout support, and report preview/status.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -410,9 +417,9 @@ enough positive events for a reliable comparison.
 
 Next milestones are scaling the synthetic population for a determinate fairness
 audit, calibrating retrieval distance thresholds against labeled relevance
-examples, strengthening reasoning/critique model independence, replacing local
-JSONL/SQLite persistence with managed storage, adding true auth/RBAC, wiring the
-care-plan edit workflow, and adding FHIR write-back/notification stubs.
+examples, strengthening reasoning/critique model independence, hardening the
+OIDC/RBAC deployment path, wiring the care-plan edit workflow, and adding FHIR
+write-back/notification stubs.
 
 ## Getting started
 
@@ -421,7 +428,7 @@ care-plan edit workflow, and adding FHIR write-back/notification stubs.
 - Python 3.12+
 - `uv` or `pip`
 - Java 11+ (for Synthea, the synthetic data generator)
-- Docker + Docker Compose for the planned Postgres and Redis services
+- Docker + Docker Compose for optional Postgres and Redis services
 - Network access on the first vector-store build so ChromaDB can cache its
   default local embedding model
 - `GROQ_API_KEY` in `.env` for the reasoning and critique agents. Optional
@@ -502,9 +509,12 @@ Then open `http://127.0.0.1:5173/`. The web app expects the FastAPI service on
 `http://localhost:8080` by default. Set matching `API_KEY` and `VITE_API_KEY`
 values so browser requests can pass the required `X-API-Key` header. Optional
 runtime variables include `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`,
-`CACHE_TTL_SECONDS`, and `VITE_REQUEST_TIMEOUT_MS`. Assessment requests can use
-a longer frontend timeout through `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval
-and care-plan drafting can take longer than ordinary API reads.
+`CACHE_TTL_SECONDS`, `REDIS_URL`, and `VITE_REQUEST_TIMEOUT_MS`. When
+`REDIS_URL` is set, assessment cache entries are stored in Redis with the same
+`CACHE_TTL_SECONDS`; if Redis is unavailable, the API falls back to its
+in-process cache. Assessment requests can use a longer frontend timeout through
+`VITE_ASSESSMENT_TIMEOUT_MS` because retrieval and care-plan drafting can take
+longer than ordinary API reads.
 
 Local demo persistence uses JSONL files plus SQLite. To route decisions, saved
 care plans, and audit events through a SQL database instead, set
@@ -715,9 +725,10 @@ or data use agreement is required to run or demo it. See
 | Implemented ingestion/modeling | pandas, scikit-survival, scikit-learn, Synthea FHIR JSON |
 | Implemented retrieval foundation | ChromaDB, section-aware discharge-note chunking, local default embeddings |
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
-| Implemented API | FastAPI, Uvicorn, Pydantic, SQLAlchemy, API-key auth, request tracing, assessment cache, local JSONL/SQLite or SQL-backed persistence, Markdown report export |
+| Implemented API | FastAPI, Uvicorn, Pydantic, SQLAlchemy, API-key/OIDC auth, role checks, request tracing, in-memory or Redis assessment cache, local JSONL/SQLite or SQL-backed persistence, Markdown report export |
 | Implemented frontend | React, Vite, React Router |
-| Planned data services | Postgres, Redis, Kafka |
+| Optional data services | Postgres, Redis |
+| Planned data services | Kafka |
 | Planned notifications | Twilio or patient portal stub |
 
 ## Success criteria
