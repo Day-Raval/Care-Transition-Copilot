@@ -33,6 +33,8 @@ carries that disclaimer.
 """
 
 import logging
+import hashlib
+import json
 import os
 import sys
 import threading
@@ -105,6 +107,7 @@ app.add_middleware(
 )
 
 _state = {}
+_redis_cache = None
 
 
 @app.middleware("http")
@@ -154,6 +157,33 @@ def _cache_ttl_seconds() -> int:
         return 600
 
 
+def _assessment_cache_key(patient_id: str, discharge_ts: str) -> str:
+    identity = "\0".join(
+        (_state.get("run_id", ""), patient_id, discharge_ts)
+    ).encode("utf-8")
+    return f"care-transition:assessment:v1:{hashlib.sha256(identity).hexdigest()}"
+
+
+def _redis_cache_client():
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        return None
+    global _redis_cache
+    if _redis_cache is None:
+        try:
+            import redis
+        except ImportError:
+            logger.warning("REDIS_URL is set but the redis package is not installed; using in-memory cache")
+            return None
+        _redis_cache = redis.Redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+    return _redis_cache
+
+
 def _clinician_actor(request: Request, fallback: str | None = None) -> str:
     actor = request.headers.get("x-clinician-id") or fallback or DEFAULT_ACTOR
     return actor.strip() or DEFAULT_ACTOR
@@ -177,6 +207,20 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
     if ttl <= 0:
         return None
     key = (patient_id, discharge_ts)
+    redis_client = _redis_cache_client()
+    if redis_client is not None:
+        try:
+            cached_json = redis_client.get(_assessment_cache_key(*key))
+            if cached_json:
+                payload = json.loads(cached_json)
+                with _state["assessment_cache_lock"]:
+                    _state["assessment_cache"][key] = (
+                        time.monotonic() + ttl,
+                        payload,
+                    )
+                return FullAssessment(**payload)
+        except Exception as exc:
+            logger.warning("Redis assessment cache read failed; using in-memory cache: %s", exc)
     with _state["assessment_cache_lock"]:
         cached = _state["assessment_cache"].get(key)
         if not cached:
@@ -193,11 +237,22 @@ def _assessment_cache_set(assessment: FullAssessment) -> None:
     if ttl <= 0:
         return
     key = (assessment.patient_id, assessment.discharge_ts)
+    payload = assessment.model_dump()
     with _state["assessment_cache_lock"]:
         _state["assessment_cache"][key] = (
             time.monotonic() + ttl,
-            assessment.model_dump(),
+            payload,
         )
+    redis_client = _redis_cache_client()
+    if redis_client is not None:
+        try:
+            redis_client.set(
+                _assessment_cache_key(*key),
+                json.dumps(payload, ensure_ascii=True, default=str),
+                ex=ttl,
+            )
+        except Exception as exc:
+            logger.warning("Redis assessment cache write failed; using in-memory cache: %s", exc)
 
 
 def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
