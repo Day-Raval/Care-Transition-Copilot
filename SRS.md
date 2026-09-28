@@ -240,6 +240,7 @@ planned and are not required for the local MVP.
 | SRS-NFR-019 | The system shall log audit events for assessment generation, chat completion, decisions, and reports. |
 | SRS-NFR-020 | The system shall log live predictions for drift monitoring. |
 | SRS-NFR-021 | The UI shall surface request IDs in error messages when available. |
+| SRS-NFR-022 | When Kafka is enabled, the system shall publish structured discharge-episode exports and runtime audit events; publish failures shall be logged without blocking local persistence or API requests. |
 
 ## 6. Configuration Requirements
 
@@ -253,6 +254,8 @@ The system shall support:
 - Risk API timeout via `RISK_API_TIMEOUT_SECONDS`.
 - Assessment cache TTL via `CACHE_TTL_SECONDS`.
 - Groq model and API key variables for reasoning and critique.
+- Optional Kafka publishing via `KAFKA_ENABLED`, `KAFKA_BOOTSTRAP_SERVERS`,
+  `KAFKA_TOPIC_EPISODES`, and `KAFKA_TOPIC_AUDIT_EVENTS`.
 
 ## 7. Acceptance Test Matrix
 

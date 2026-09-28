@@ -105,6 +105,9 @@ The current MVP includes:
 - React UI with risk queue, Patients, Care plans, Ask a question, approve and
   reject actions, and approved mock report preview.
 - JSONL audit logs, saved care-plan logs, and SQLite-backed decision storage.
+- Optional Kafka producers for structured discharge-episode exports and
+  runtime audit events; Kafka consumers and managed event processing remain
+  outside the current MVP.
 
 ### Planned Scope
 

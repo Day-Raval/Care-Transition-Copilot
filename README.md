@@ -524,10 +524,24 @@ mode creates `care_plan_decisions`, `care_plans`, `audit_events`, and
 table when it has been migrated. The React app sends clinician attribution with
 `VITE_CLINICIAN_ID`, which defaults to `demo_clinician`.
 
-Kafka event publishing is optional. Set `KAFKA_ENABLED=true`,
-`KAFKA_BOOTSTRAP_SERVERS`, and the `KAFKA_TOPIC_*` variables to publish
-structured discharge-episode exports and runtime audit events. The API logs
-Kafka failures and continues serving requests.
+Kafka publishing is disabled by default. The `confluent-kafka` dependency is
+listed in `requirements.txt`. To enable publishing, set `KAFKA_ENABLED=true`
+and configure `KAFKA_BOOTSTRAP_SERVERS`; topic defaults are
+`care-transition.discharge-episodes` and `care-transition.audit-events`, and
+can be overridden with `KAFKA_TOPIC_EPISODES` and
+`KAFKA_TOPIC_AUDIT_EVENTS`. `KAFKA_CLIENT_ID` defaults to
+`care-transition-copilot`, and `KAFKA_MESSAGE_TIMEOUT_MS` defaults to `5000`.
+
+Running `python scripts/export_records.py` writes the structured discharge
+CSV and note JSONL files and, when Kafka is enabled, publishes one
+`discharge_episode_exported` event per structured episode. API audit events
+are published after their local JSONL or database write. Events use an
+envelope containing `schema_version`, `event_id`, `event_type`, `occurred_at`,
+`source`, and `payload`. Publish failures are logged; they do not block local
+export, persistence, or API requests. The `/health` dependency report checks
+the Kafka configuration and client package when enabled, but does not verify
+broker connectivity. This repository provides producers only; consumers and
+managed event processing remain deployment-specific.
 
 See `database/README.md` for connection-check and one-time migration scripts
 that move existing local JSONL/SQLite data and `discharge_records_with_target.csv`

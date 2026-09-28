@@ -97,7 +97,19 @@ Synthea can emit multiple encounter resources for one logical hospital stay.
 `src/ingestion/episodes.py` clusters inpatient encounters into hospitalization
 episodes before target labeling or feature export.
 
-### 4.4 Target Labeling
+### 4.4 Kafka Event Publishing
+
+Kafka publishing is an optional producer path and is disabled by default.
+`scripts/export_records.py` publishes structured discharge-episode events while
+writing the CSV and note JSONL outputs. The API publishes runtime audit events
+after writing each event to the configured local JSONL or database store.
+Events share a versioned envelope with an event ID, type, UTC timestamp,
+producer source, and payload. Publish failures are logged without blocking the
+local write or API request. The health dependency report checks configuration
+and client availability, not broker connectivity. Kafka consumers and managed
+event processing are not implemented in this repository.
+
+### 4.5 Target Labeling
 
 `src/features/target.py` creates 30-day outcome labels:
 
