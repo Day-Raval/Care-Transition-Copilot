@@ -35,17 +35,19 @@ from src.api.production import (  # noqa: E402
     AUDIT_LOG_PATH,
     CARE_PLANS_PATH,
     DECISIONS_DB_PATH,
+    DISCHARGE_RECORDS_TABLE,
     _audit_events_table,
     _care_plans_table,
     _decisions_table,
-    _metadata,
+    _ensure_database_schema,
+    _model_predictions_table,
 )
 
 import os  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DISCHARGE_RECORDS_PATH = PROJECT_ROOT / "data" / "processed" / "discharge_records_with_target.csv"
-DISCHARGE_RECORDS_TABLE = "discharge_records_with_target"
+PREDICTION_LOG_PATH = PROJECT_ROOT / "results" / "prediction_log.csv"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -138,6 +140,40 @@ def migrate_discharge_records(engine) -> int:
     return len(df)
 
 
+def migrate_prediction_log(engine) -> int:
+    if not PREDICTION_LOG_PATH.exists():
+        return 0
+
+    df = pd.read_csv(PREDICTION_LOG_PATH)
+    migrated = 0
+    with engine.begin() as conn:
+        for rec in df.to_dict(orient="records"):
+            timestamp = rec.pop("timestamp", None)
+            risk_score = rec.pop("risk_score", None)
+            model_run_id = rec.pop("model_run_id", None)
+            feature_values = {k: v for k, v in rec.items() if pd.notna(v)}
+            payload_json = json.dumps(feature_values, ensure_ascii=True, default=str)
+            exists = conn.execute(
+                select(_model_predictions_table.c.id).where(
+                    _model_predictions_table.c.timestamp == timestamp,
+                    _model_predictions_table.c.risk_score == risk_score,
+                    _model_predictions_table.c.feature_values_json == payload_json,
+                )
+            ).first()
+            if exists:
+                continue
+            conn.execute(
+                _model_predictions_table.insert().values(
+                    timestamp=timestamp,
+                    risk_score=risk_score,
+                    model_run_id=None if pd.isna(model_run_id) else model_run_id,
+                    feature_values_json=payload_json,
+                )
+            )
+            migrated += 1
+    return migrated
+
+
 def main() -> int:
     if not DATABASE_URL:
         print("DATABASE_URL is not set. Check your .env file.")
@@ -145,8 +181,8 @@ def main() -> int:
 
     engine = create_engine(DATABASE_URL, future=True)
     try:
-        _metadata.create_all(engine)
-        print("Schema ensured: care_plan_decisions, care_plans, audit_events")
+        _ensure_database_schema(engine)
+        print("Schema ensured: care_plan_decisions, care_plans, audit_events, model_predictions")
 
         total, migrated = migrate_decisions(engine)
         print(f"Decisions:   {migrated} upserted out of {total} local rows")
@@ -159,6 +195,9 @@ def main() -> int:
 
         loaded = migrate_discharge_records(engine)
         print(f"Discharge records with target: {loaded} rows reloaded into '{DISCHARGE_RECORDS_TABLE}'")
+
+        migrated = migrate_prediction_log(engine)
+        print(f"Prediction log: {migrated} inserted from local CSV")
         return 0
     finally:
         engine.dispose()

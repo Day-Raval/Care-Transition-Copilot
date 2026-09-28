@@ -48,3 +48,7 @@ results/*.jsonl
 
 # SQLite runtime databases
 *.sqlite3
+
+# kafka
+*.log
+kafka_*/

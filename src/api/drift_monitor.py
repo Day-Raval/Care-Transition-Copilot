@@ -28,19 +28,30 @@ import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp
 
+from src.api.production import database_requested, log_model_prediction, read_recent_model_predictions
+
 PREDICTION_LOG_PATH = "results/prediction_log.csv"
 MIN_PREDICTIONS_FOR_DRIFT_CHECK = 30
 DRIFT_P_VALUE_THRESHOLD = 0.05
 
 
-def log_prediction(feature_values: dict, risk_score: float):
+def log_prediction(feature_values: dict, risk_score: float, model_run_id: str | None = None):
     """Appends one served prediction's inputs + output to a durable log,
     so drift can be assessed across restarts, not just this process's
     lifetime."""
+    if database_requested():
+        log_model_prediction(feature_values, risk_score, model_run_id=model_run_id)
+        return
+
     os.makedirs(os.path.dirname(PREDICTION_LOG_PATH), exist_ok=True)
     file_exists = os.path.exists(PREDICTION_LOG_PATH)
 
-    row = {"timestamp": datetime.now().isoformat(timespec="seconds"), "risk_score": risk_score, **feature_values}
+    row = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "risk_score": risk_score,
+        "model_run_id": model_run_id,
+        **feature_values,
+    }
 
     with open(PREDICTION_LOG_PATH, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
@@ -50,6 +61,8 @@ def log_prediction(feature_values: dict, risk_score: float):
 
 
 def load_recent_predictions(n: int = 200):
+    if database_requested():
+        return read_recent_model_predictions(limit=n)
     if not os.path.exists(PREDICTION_LOG_PATH):
         return None
     df = pd.read_csv(PREDICTION_LOG_PATH)

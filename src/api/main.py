@@ -60,6 +60,7 @@ from src.api.production import (
     build_transition_report,
     init_decision_db,
     latest_decision,
+    load_discharge_records,
     log_audit_event,
     read_care_plans,
     runtime_dependency_report,
@@ -380,6 +381,7 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
 @app.on_event("startup")
 def load_production_model():
     cfg = load_config()
+    _state["config"] = cfg
     dependencies = runtime_dependency_report(cfg)
     _state["runtime_dependencies"] = dependencies
     if not cfg.production_run_id:
@@ -396,7 +398,7 @@ def load_production_model():
 
     model, feature_names = load_model(cfg.production_run_id)
 
-    df = pd.read_csv(cfg.output_csv.replace(".csv", "_with_target.csv"))
+    df = load_discharge_records(cfg)
     modeling_df = df[df["outcome"].isin(["POSITIVE", "NEGATIVE"])].copy()
     X_ref = modeling_df[feature_names].copy()
     for col in feature_names:
@@ -427,7 +429,7 @@ def load_production_model():
         percentile = float((reference_scores < risk_score).mean() * 100)
         category = _categorize(percentile)
 
-        log_prediction(feature_values=payload, risk_score=risk_score)
+        log_prediction(feature_values=payload, risk_score=risk_score, model_run_id=cfg.production_run_id)
 
         return RiskPrediction(
             risk_score=round(risk_score, 4),
@@ -444,7 +446,8 @@ def load_production_model():
 def health():
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    dependencies = _state.get("runtime_dependencies", {"ready": True, "missing": [], "checks": {}})
+    dependencies = runtime_dependency_report(_state.get("config", load_config()))
+    _state["runtime_dependencies"] = dependencies
     return {
         "status": "ok" if dependencies["ready"] else "degraded",
         "model_run_id": _state["run_id"],

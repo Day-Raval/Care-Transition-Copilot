@@ -21,6 +21,7 @@ Utilities for managing and inspecting the project's PostgreSQL database
     `patient_id` + `discharge_ts`)
   - `results/care_plans.jsonl` → `care_plans`
   - `results/audit_log.jsonl` → `audit_events`
+  - `results/prediction_log.csv` → `model_predictions`
   - `data/processed/discharge_records_with_target.csv` → `discharge_records_with_target`
     (full reload each run — static source-of-truth export, keyed on
     `encounter_id`)

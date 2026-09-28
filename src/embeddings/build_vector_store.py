@@ -23,18 +23,20 @@ from src.utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-CHROMA_PATH = "data/processed/chroma_db"
-COLLECTION_NAME = "discharge_notes"
+CHROMA_PATH = os.getenv("CHROMA_PATH", "data/processed/chroma_db")
+COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "discharge_notes")
 BATCH_SIZE = 100  # ChromaDB embeds per batch — keeps memory/progress reasonable
 
 
-def build_vector_store(notes_path: str, embedding_function=None) -> chromadb.Collection:
+def build_vector_store(notes_path: str, embedding_function=None, rebuild: bool = False) -> chromadb.Collection:
     """
     embedding_function=None uses ChromaDB's real default (production path).
     Tests pass a deterministic stand-in here instead, to validate storage/
     query/metadata behavior without needing network access for a model
     download.
     """
+    if os.path.exists(CHROMA_PATH) and not rebuild:
+        raise RuntimeError(f"Vector store already exists at {CHROMA_PATH}; pass rebuild=True to replace it.")
     if os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
 
@@ -45,7 +47,8 @@ def build_vector_store(notes_path: str, embedding_function=None) -> chromadb.Col
         kwargs["embedding_function"] = embedding_function
     collection = client.create_collection(**kwargs)
 
-    records = [json.loads(line) for line in open(notes_path)]
+    with open(notes_path, encoding="utf-8") as f:
+        records = [json.loads(line) for line in f]
     logger.info("Chunking %d notes...", len(records))
 
     all_chunks = []
@@ -78,6 +81,6 @@ def build_vector_store(notes_path: str, embedding_function=None) -> chromadb.Col
 if __name__ == "__main__":
     setup_logging()
     cfg = load_config()
-    collection = build_vector_store(cfg.output_notes)
+    collection = build_vector_store(cfg.output_notes, rebuild=True)
     print(f"Vector store built at {CHROMA_PATH}")
     print(f"Collection '{COLLECTION_NAME}' contains {collection.count()} chunks")

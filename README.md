@@ -519,9 +519,15 @@ longer than ordinary API reads.
 Local demo persistence uses JSONL files plus SQLite. To route decisions, saved
 care plans, and audit events through a SQL database instead, set
 `PERSISTENCE_BACKEND=database` and `DATABASE_URL=postgresql://...`. Database
-mode creates `care_plan_decisions`, `care_plans`, and `audit_events` tables on
-startup. The React app sends clinician attribution with `VITE_CLINICIAN_ID`,
-which defaults to `demo_clinician`.
+mode creates `care_plan_decisions`, `care_plans`, `audit_events`, and
+`model_predictions` tables on startup, and reads the discharge-record source
+table when it has been migrated. The React app sends clinician attribution with
+`VITE_CLINICIAN_ID`, which defaults to `demo_clinician`.
+
+Kafka event publishing is optional. Set `KAFKA_ENABLED=true`,
+`KAFKA_BOOTSTRAP_SERVERS`, and the `KAFKA_TOPIC_*` variables to publish
+structured discharge-episode exports and runtime audit events. The API logs
+Kafka failures and continues serving requests.
 
 See `database/README.md` for connection-check and one-time migration scripts
 that move existing local JSONL/SQLite data and `discharge_records_with_target.csv`
@@ -727,8 +733,8 @@ or data use agreement is required to run or demo it. See
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
 | Implemented API | FastAPI, Uvicorn, Pydantic, SQLAlchemy, API-key/OIDC auth, role checks, request tracing, in-memory or Redis assessment cache, local JSONL/SQLite or SQL-backed persistence, Markdown report export |
 | Implemented frontend | React, Vite, React Router |
-| Optional data services | Postgres, Redis |
-| Planned data services | Kafka |
+| Optional data services | Postgres, Redis, Kafka producer integration |
+| Planned data services | Kafka consumers / managed event processing |
 | Planned notifications | Twilio or patient portal stub |
 
 ## Success criteria

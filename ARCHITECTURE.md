@@ -361,7 +361,9 @@ The local MVP runs as:
 The proposal's target deployment includes:
 
 - FHIR or HL7v2 intake adapter.
-- Kafka or equivalent event bus.
+- Kafka or equivalent event bus. The codebase includes optional Kafka producer
+  integration for discharge-episode exports and runtime audit events; managed
+  consumers remain deployment-specific.
 - Managed Postgres for episodes, decisions, audit IDs, and features.
 - Managed vector database or ChromaDB deployment for clinical text.
 - Redis or managed cache for repeat lookups.

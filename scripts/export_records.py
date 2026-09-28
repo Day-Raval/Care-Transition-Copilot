@@ -20,6 +20,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, ".")
+from src.data_services.kafka_events import flush_events, publish_discharge_episode
 from src.ingestion.fhir_parser import parse_all_bundles
 from src.utils.config import load_config
 
@@ -28,6 +29,7 @@ records, failures = parse_all_bundles(cfg.fhir_dir, cfg)
 
 # --- Structured, tabular file for the risk model ---
 tabular_rows = []
+published_episode_events = 0
 for r in records:
     row = r.__dict__.copy()
     row.pop("discharge_note_text")  # excluded from the tabular file entirely
@@ -37,6 +39,8 @@ for r in records:
     for attr, val in row.pop("protected_attributes").items():
         row[f"protected_{attr}"] = val
     tabular_rows.append(row)
+    if publish_discharge_episode(row):
+        published_episode_events += 1
 
 df = pd.DataFrame(tabular_rows)
 df.to_csv(cfg.output_csv, index=False)
@@ -54,4 +58,7 @@ with open(cfg.output_notes, "w") as f:
 
 print(f"{len(df)} rows written to {cfg.output_csv} (structured, no free text)")
 print(f"{len(records)} notes written to {cfg.output_notes} (for the vector store)")
+if published_episode_events:
+    flush_events()
+    print(f"{published_episode_events} discharge episode events published to Kafka")
 print(f"Failures: {len(failures)}")
