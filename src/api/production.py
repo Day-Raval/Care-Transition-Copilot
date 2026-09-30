@@ -32,11 +32,16 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 
 from src.data_services.kafka_events import kafka_dependency_report, publish_audit_event
+from src.data_services.notifications import (
+    notification_dependency_report,
+    send_care_plan_notification,
+)
 from src.utils.config import Config
 
 RESULTS_DIR = Path("results")
 AUDIT_LOG_PATH = RESULTS_DIR / "audit_log.jsonl"
 CARE_PLANS_PATH = RESULTS_DIR / "care_plans.jsonl"
+NOTIFICATIONS_PATH = RESULTS_DIR / "notifications.jsonl"
 DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
 REPORTS_DIR = Path("reports")
 CHROMA_PATH = "data/processed/chroma_db"
@@ -95,6 +100,18 @@ _model_predictions_table = Table(
     Column("risk_score", Float, nullable=False),
     Column("model_run_id", String, nullable=True),
     Column("feature_values_json", Text, nullable=False),
+)
+
+_notifications_table = Table(
+    "notifications",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("patient_id", String, nullable=True),
+    Column("discharge_ts", String, nullable=True),
+    Column("channel", String, nullable=True),
+    Column("status", String, nullable=True),
+    Column("payload_json", Text, nullable=False),
 )
 
 
@@ -230,6 +247,51 @@ def read_care_plans(limit: int = 100) -> list[dict[str, Any]]:
             )
             return [json.loads(row.payload_json) for row in rows]
     return read_jsonl(CARE_PLANS_PATH, limit=limit)
+
+
+def notify_care_plan_decision(
+    patient_id: str,
+    discharge_ts: str,
+    message: str,
+    to_number: str | None = None,
+) -> dict[str, Any]:
+    """Send (or stub) a post-decision notification and persist the record."""
+    record = send_care_plan_notification(patient_id, discharge_ts, message, to_number=to_number)
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _notifications_table.insert().values(
+                    timestamp=record["timestamp"],
+                    patient_id=record.get("patient_id"),
+                    discharge_ts=record.get("discharge_ts"),
+                    channel=record.get("channel"),
+                    status=record.get("status"),
+                    payload_json=_json_dumps(record),
+                )
+            )
+    else:
+        append_jsonl(NOTIFICATIONS_PATH, record)
+    return record
+
+
+def read_notifications(limit: int = 100) -> list[dict[str, Any]]:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM notifications
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            return [json.loads(row.payload_json) for row in rows]
+    return read_jsonl(NOTIFICATIONS_PATH, limit=limit)
 
 
 def medication_context(summary: str) -> str:
@@ -408,6 +470,7 @@ def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[st
 def runtime_dependency_report(cfg: Config) -> dict[str, Any]:
     target_csv = cfg.output_csv.replace(".csv", "_with_target.csv")
     kafka = kafka_dependency_report()
+    notifications = notification_dependency_report()
     database_ok = True
     if database_requested():
         try:
@@ -423,6 +486,7 @@ def runtime_dependency_report(cfg: Config) -> dict[str, Any]:
         "database_url": not database_requested() or bool(os.getenv("DATABASE_URL")),
         "database_connectivity": not database_requested() or database_ok,
         "kafka": kafka["ready"],
+        "notifications": notifications["ready"],
     }
     missing = [name for name, ok in checks.items() if not ok]
     return {
@@ -430,6 +494,7 @@ def runtime_dependency_report(cfg: Config) -> dict[str, Any]:
         "checks": checks,
         "missing": missing,
         "kafka": kafka,
+        "notifications": notifications,
     }
 
 

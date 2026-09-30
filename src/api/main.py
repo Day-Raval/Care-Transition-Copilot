@@ -62,7 +62,9 @@ from src.api.production import (
     latest_decision,
     load_discharge_records,
     log_audit_event,
+    notify_care_plan_decision,
     read_care_plans,
+    read_notifications,
     runtime_dependency_report,
     save_care_plan,
     save_decision,
@@ -563,6 +565,20 @@ def decide_patient_plan(
         decision=decision_request.decision,
         actor=actor,
     )
+    if decision_request.decision == "approved":
+        notification = notify_care_plan_decision(
+            patient_id=patient_id,
+            discharge_ts=episode_discharge_ts,
+            message=f"Your care team ({actor}) approved your follow-up plan. Check the patient portal for details.",
+        )
+        log_audit_event(
+            "notification_sent",
+            patient_id=patient_id,
+            discharge_ts=episode_discharge_ts,
+            actor=actor,
+            channel=notification["channel"],
+            status=notification["status"],
+        )
     return DecisionRecord(**record)
 
 
@@ -606,6 +622,11 @@ def patient_report(patient_id: str, discharge_ts: str | None = None):
 @app.get("/care-plans")
 def saved_care_plans(limit: int = 50):
     return read_care_plans(limit=limit)
+
+
+@app.get("/notifications")
+def saved_notifications(limit: int = 50):
+    return read_notifications(limit=limit)
 
 
 @app.post("/chat", response_model=ChatResponse)
