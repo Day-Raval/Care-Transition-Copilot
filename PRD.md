@@ -51,7 +51,7 @@ The current MVP does not:
 1. Provide clinically validated readmission probabilities.
 2. Replace clinician judgment.
 3. Write directly to a production EHR.
-4. Send real patient notifications.
+4. Provide production-grade patient notification delivery and messaging governance.
 5. Provide production identity, RBAC, or managed persistence.
 6. Claim a passed fairness audit at the current sample size.
 7. Use real patient data.
@@ -105,6 +105,8 @@ The current MVP includes:
 - React UI with risk queue, Patients, Care plans, Ask a question, approve and
   reject actions, and approved mock report preview.
 - JSONL audit logs, saved care-plan logs, and SQLite-backed decision storage.
+- Approved-plan notification handoff through a local portal stub, with optional
+  Twilio SMS delivery and persisted notification outcomes.
 - Optional Kafka producers for structured discharge-episode exports and
   runtime audit events; Kafka consumers and managed event processing remain
   outside the current MVP.
@@ -117,7 +119,8 @@ Planned production hardening includes:
 - Production OAuth2, SSO, and role-based access control.
 - Full edit and resubmission workflow for rejected care plans.
 - FHIR write-back stubs and later production EHR integration.
-- Notification stubs for portal, SMS, or reminder workflows.
+- Provider-backed notification delivery, retries, and reminder workflows beyond
+  the current portal stub and optional Twilio SMS path.
 - CI/CD, managed observability, retries, and circuit breakers.
 - Larger synthetic population or approved validation dataset for stronger
   fairness analysis.
@@ -149,6 +152,10 @@ A clinician should be able to approve or reject a generated plan. Approved
 plans can generate a mock Markdown care-transition report. Rejected plans should
 be marked for edit and resubmission.
 
+After approval, the system should queue a notification for the patient or care
+team. Local demos use a portal stub; optional Twilio SMS delivery is provider
+configuration, not a clinical messaging guarantee.
+
 ### Ask a Question
 
 The chat view should allow ad hoc questions about a patient. When the assistant
@@ -168,6 +175,7 @@ uses tools, the UI should expose the tool calls and results as an audit trail.
 | PRD-FR-008 | The system shall skip full chart review for low risk patients and return a templated summary. |
 | PRD-FR-009 | The system shall persist clinician approve or reject decisions by patient episode. |
 | PRD-FR-010 | The system shall generate mock transition reports only for approved decisions. |
+| PRD-FR-011 | The system shall record an approved-plan notification outcome without failing the clinician decision when delivery is unavailable. |
 
 ## 10. Success Metrics
 

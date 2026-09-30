@@ -43,6 +43,7 @@ flowchart TB
     api --> decisions["SQLite decisions and JSONL audit logs"]
     plan --> decisions
     decisions --> reports["Approved Markdown reports"]
+    decisions --> notifications["Portal stub or Twilio SMS"]
 
     web["React clinician UI"] --> api
 ```
@@ -285,10 +286,24 @@ Current local persistence uses:
 - `results/care_plans.jsonl` for generated care plans.
 - `results/decisions.sqlite3` for clinician decisions.
 - `results/prediction_log.csv` for served predictions.
+- `results/notifications.jsonl` for approved-plan notification outcomes.
 - `reports/*.md` for approved mock transition reports.
 
 These are local MVP stores. Production architecture should replace them with
-managed database tables, durable object storage, and formal audit retention.
+managed database tables, durable notification delivery, durable object storage,
+and formal audit retention. When database persistence is enabled, notification
+records are stored in the `notifications` table.
+
+### 8.5 Notification Handoff
+
+An approved care-plan decision queues a notification after the decision is
+persisted. The default `portal_stub` channel is local and requires no external
+service. If `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and
+`TWILIO_FROM_NUMBER` are configured, the channel is `twilio_sms`; SMS delivery
+also requires the optional `twilio` package and a recipient number. A missing
+recipient falls back to the portal stub. Notification failures are recorded and
+do not turn a successful clinician approval into an API error. `GET
+/notifications` exposes recent saved records for the local workflow.
 
 ## 9. Web Architecture
 

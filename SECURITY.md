@@ -20,7 +20,7 @@ The application has several distinct trust boundaries:
 1. **Browser to API:** the React app sends either a bearer access token in OIDC mode or a shared API key in local demo mode.
 2. **API to identity provider:** the API obtains the signing key from the configured JWKS endpoint and validates access-token claims.
 3. **API to model service:** in OIDC mode, `/predict` uses the service API key rather than an end-user token.
-4. **Application to storage and model providers:** patient/episode data, generated plans, audit events, and LLM requests may cross to configured databases, vector stores, or external model providers. Operators must assess and approve those services before using sensitive data.
+4. **Application to storage, notification, and model providers:** patient/episode data, generated plans, audit events, notification messages, and LLM requests may cross to configured databases, vector stores, SMS providers, or external model providers. Operators must assess and approve those services before using sensitive data.
 
 The browser is an untrusted client. Frontend checks improve usability but do not enforce security; the API is authoritative.
 
@@ -90,6 +90,7 @@ Review the route policy whenever adding or changing an API endpoint. Add tests f
 - **Human review:** care plans remain drafts until a clinician approves them. Reports are generated only after an approved decision; rejected plans return an edit-required status. This workflow does not make the model or generated recommendations clinically validated.
 - **Patient-scoped retrieval:** note retrieval is filtered to the requested patient before semantic ranking. Keep this invariant covered when modifying retrieval or data access paths.
 - **Audit and persistence:** decision, care-plan, and audit records can use local SQLite/JSONL or the configured SQL database. Local files are demo storage, not durable or managed audit storage. Audit records may contain patient identifiers and other sensitive context; protect and retain them accordingly.
+- **Notification handoff:** approved decisions create a notification record. The local portal stub does not contact an external service; configured Twilio SMS sends the message to the supplied recipient. Keep Twilio credentials server-side, restrict provider access, and treat message content and delivery metadata as sensitive. Notification failure does not bypass clinician approval or fail the decision write.
 - **Model caveats:** the risk output is a relative score, not a calibrated probability. The current fairness audit is inconclusive. API responses include a research/not-clinically-validated disclaimer.
 
 ## Data and secrets
@@ -97,6 +98,7 @@ Review the route policy whenever adding or changing an API endpoint. Add tests f
 - Use synthetic Synthea data for local development and demonstrations.
 - Do not commit `.env`, access tokens, API keys, database credentials, or real patient data. Rotate any credential that is accidentally exposed.
 - Do not place secrets in `VITE_*` variables. Vite exposes these values to the browser bundle.
+- Never place Twilio credentials in `VITE_*` variables or frontend code. They are server-side secrets and must not be sent to the browser.
 - Before using any real or sensitive data, review data flows to the database, Chroma/vector store, logs, backups, and configured LLM providers. Confirm contractual, privacy, residency, retention, encryption, and access-control requirements with the responsible organization.
 - The application does not itself provide encryption-at-rest policy, managed key rotation, data retention/deletion workflows, tenant isolation, or a compliance certification. Configure these controls in the deployment and its managed services before any production use.
 - Treat generated plans, model outputs, audit events, reports, prompts, and retrieved note excerpts as sensitive data if they are derived from sensitive inputs.

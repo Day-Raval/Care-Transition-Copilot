@@ -53,5 +53,7 @@ python database/verify_migration.py       # 3. confirm nothing was lost
 ```
 
 After migration, set `PERSISTENCE_BACKEND=database` in `.env` so the API
-reads/writes decisions, care plans, and audit events from Postgres instead of
-the local JSONL/SQLite files.
+reads/writes decisions, care plans, audit events, and notification records from
+Postgres instead of the local JSONL/SQLite files. Notification records created
+after migration are written to the `notifications` table; the migration script
+does not backfill an existing `results/notifications.jsonl` file.

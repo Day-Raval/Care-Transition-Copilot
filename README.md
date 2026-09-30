@@ -160,6 +160,11 @@ flowchart TB
   timeouts, cached assessment generation with optional Redis backing,
   file-based or SQL-backed audit/care-plan persistence, request tracing,
   idempotent care-plan decisions, and actor tracking for clinician actions.
+- **Implemented notification handoff** - approved care plans queue a patient
+  portal stub notification by default, or send an SMS through Twilio when the
+  optional credentials, package, and recipient number are configured. Delivery
+  results are persisted locally or in SQL and never make the decision request
+  fail.
 - **Planned platform services** - managed deployment, CI/CD, production
   monitoring, retries, circuit breakers, FHIR write-back, and notification
   delivery remain future hardening work.
@@ -296,6 +301,12 @@ The current repository shows the first stage of the MVP working locally:
   returns an approved Markdown report and saves it under `reports/` with public
   demo naming such as `care-transition-report__2026-08-09__994d6249.md`.
   Rejected drafts return an edit-required status instead of a finalized report.
+- Added post-approval notifications through `src.data_services.notifications`.
+  The default local `portal_stub` records a queued notification; optional
+  Twilio SMS delivery requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_FROM_NUMBER`, the `twilio` package, and a recipient number. Delivery
+  failures are recorded without failing the approval request, and notification
+  records are available through `GET /notifications`.
 - Updated the dashboard evidence panel to show cited chart excerpts directly in
   the Patient evidence panel, grouped by retrieval category and source. The
   display layer strips repeated headers, deduplicates repeated clinical items,

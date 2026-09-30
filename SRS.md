@@ -57,6 +57,7 @@ The FastAPI service shall expose:
 | POST | `/patients/{patient_id}/decision` | Persist approve or reject decision. |
 | GET | `/patients/{patient_id}/report` | Return approved report or pending/rejected status. |
 | GET | `/care-plans` | Return saved generated care plans. |
+| GET | `/notifications` | Return recent persisted notification outcomes. |
 | POST | `/chat` | Return chat answer and tool-call audit trail. |
 
 ### 3.3 Data Interfaces
@@ -176,17 +177,19 @@ planned and are not required for the local MVP.
 | SRS-FR-044 | Decision writes shall be idempotent per patient episode. | Must | Run decision idempotency test. |
 | SRS-FR-045 | Approved decisions shall allow report generation. | Must | GET report after approval. |
 | SRS-FR-046 | Rejected decisions shall return edit-required status and no final report. | Must | GET report after rejection. |
+| SRS-FR-047 | Approved decisions shall queue a notification outcome using the portal stub or configured Twilio channel. | Should | Approve a plan and inspect `/notifications`. |
+| SRS-FR-048 | Notification delivery failures shall be recorded without failing the clinician decision request. | Must | Simulate unavailable provider and inspect decision response. |
 
 ### 4.10 Web Application
 
 | ID | Requirement | Priority | Verification |
 | --- | --- | --- | --- |
-| SRS-FR-047 | The web app shall display the risk queue. | Must | Manual UI test. |
-| SRS-FR-048 | The web app shall display patient evidence grouped by retrieval category and source. | Must | Manual UI test with assessment payload. |
-| SRS-FR-049 | The web app shall allow approve and reject actions from the dashboard. | Must | Manual UI test and API decision record. |
-| SRS-FR-050 | The web app shall display approved report preview or rejected edit-required status. | Should | Manual UI test. |
-| SRS-FR-051 | The web app shall display chat answers and visible tool-call audit trail. | Should | Manual UI test. |
-| SRS-FR-052 | The web app shall show loading, empty, and error states with request IDs when available. | Should | Manual UI test. |
+| SRS-FR-049 | The web app shall display the risk queue. | Must | Manual UI test. |
+| SRS-FR-050 | The web app shall display patient evidence grouped by retrieval category and source. | Must | Manual UI test with assessment payload. |
+| SRS-FR-051 | The web app shall allow approve and reject actions from the dashboard. | Must | Manual UI test and API decision record. |
+| SRS-FR-052 | The web app shall display approved report preview or rejected edit-required status. | Should | Manual UI test. |
+| SRS-FR-053 | The web app shall display chat answers and visible tool-call audit trail. | Should | Manual UI test. |
+| SRS-FR-054 | The web app shall show loading, empty, and error states with request IDs when available. | Should | Manual UI test. |
 
 ## 5. Non Functional Requirements
 
@@ -256,6 +259,8 @@ The system shall support:
 - Groq model and API key variables for reasoning and critique.
 - Optional Kafka publishing via `KAFKA_ENABLED`, `KAFKA_BOOTSTRAP_SERVERS`,
   `KAFKA_TOPIC_EPISODES`, and `KAFKA_TOPIC_AUDIT_EVENTS`.
+- Optional notification delivery via `NOTIFICATIONS_ENABLED` and, for Twilio
+  SMS, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER`.
 
 ## 7. Acceptance Test Matrix
 
@@ -268,6 +273,7 @@ The system shall support:
 | Generate assessment for high risk episode. | Orchestrator returns retrieval context, draft plan, and critique notes. |
 | Approve an assessment. | Decision stored and report endpoint returns approved Markdown report. |
 | Reject an assessment. | Decision stored and report endpoint returns edit-required status. |
+| Approve an assessment with notifications enabled. | Decision succeeds and a queued, sent, disabled, or failed notification outcome is persisted. |
 | Ask a chart/risk question. | Chat response includes answer and tool calls. |
 | Build frontend. | React build succeeds. |
 
