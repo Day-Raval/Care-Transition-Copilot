@@ -70,11 +70,12 @@ export function getDecision(patientId, dischargeTs = null) {
   return request(`/patients/${patientId}/decision${params}`);
 }
 
-export function saveDecision(patientId, dischargeTs, decision) {
+export function saveDecision(patientId, dischargeTs, decision, draftPlan = null) {
   const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  const body = draftPlan ? { decision, draft_plan: draftPlan } : { decision };
   return request(`/patients/${patientId}/decision${params}`, {
     method: "POST",
-    body: JSON.stringify({ decision }),
+    body: JSON.stringify(body),
   });
 }
 

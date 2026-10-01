@@ -104,7 +104,7 @@ class OIDCAuthenticationTest(unittest.TestCase):
             "decision": "approved",
             "decided_at": "2026-09-26T12:00:00+00:00",
             "actor": "clinician-123",
-            "draft_plan": "Follow-up plan",
+            "draft_plan": "Edited follow-up plan",
         }
         with (
             patch.dict(main._state, {"test_state": True}, clear=True),
@@ -120,11 +120,12 @@ class OIDCAuthenticationTest(unittest.TestCase):
                     "Authorization": f"Bearer {token}",
                     "X-Clinician-ID": "forged-header-user",
                 },
-                json={"decision": "approved", "actor": "forged-body-user"},
+                json={"decision": "approved", "actor": "forged-body-user", "draft_plan": "Edited follow-up plan"},
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["actor"], "clinician-123")
         self.assertEqual(save_decision.call_args.kwargs["actor"], "clinician-123")
+        self.assertEqual(save_decision.call_args.kwargs["draft_plan"], "Edited follow-up plan")
 
     def test_health_remains_public_and_predict_requires_service_key(self):
         client = TestClient(main.app)

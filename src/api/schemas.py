@@ -100,6 +100,7 @@ class ChatResponse(BaseModel):
 
 class DecisionRequest(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
+    draft_plan: str | None = Field(default=None, min_length=1)
 
 
 class DecisionRecord(BaseModel):

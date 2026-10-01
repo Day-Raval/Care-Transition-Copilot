@@ -555,7 +555,7 @@ def decide_patient_plan(
         patient_id=patient_id,
         discharge_ts=episode_discharge_ts,
         decision=decision_request.decision,
-        draft_plan=assessment.draft_plan,
+        draft_plan=decision_request.draft_plan or assessment.draft_plan,
         actor=actor,
     )
     log_audit_event(

@@ -286,6 +286,8 @@ export default function Dashboard() {
   const [decision, setDecision] = useState(null);
   const [savingDecision, setSavingDecision] = useState(false);
   const [error, setError] = useState(null);
+  const [isEditingPlan, setIsEditingPlan] = useState(false);
+  const [editedDraftPlan, setEditedDraftPlan] = useState("");
 
   useEffect(() => {
     getQueue(null, 20)
@@ -300,6 +302,8 @@ export default function Dashboard() {
     setDecision(null);
     setReport(null);
     setError(null);
+    setIsEditingPlan(false);
+    setEditedDraftPlan("");
     setLoadingAssessment(true);
     Promise.all([
       getAssessment(item.patient_id, item.discharge_ts),
@@ -308,6 +312,7 @@ export default function Dashboard() {
       .then(([assessmentResult, decisionResult]) => {
         setAssessment(assessmentResult);
         setDecision(decisionResult);
+        setEditedDraftPlan(displayCarePlanText(assessmentResult.draft_plan));
         if (decisionResult) loadReport(item);
       })
       .catch((e) => setError(e.message))
@@ -323,18 +328,28 @@ export default function Dashboard() {
       .finally(() => setLoadingReport(false));
   }
 
-  function recordDecision(nextDecision) {
+  function recordDecision(nextDecision, draftPlan = null) {
     if (!selected) return;
     setSavingDecision(true);
     setReport(null);
     setError(null);
-    saveDecision(selected.patient_id, selected.discharge_ts, nextDecision)
+    saveDecision(selected.patient_id, selected.discharge_ts, nextDecision, draftPlan)
       .then((savedDecision) => {
         setDecision(savedDecision);
+        setIsEditingPlan(false);
         loadReport(selected);
       })
       .catch((e) => setError(e.message))
       .finally(() => setSavingDecision(false));
+  }
+
+  function toggleEditPlan() {
+    if (isEditingPlan) {
+      setEditedDraftPlan(displayCarePlanText(assessment?.draft_plan));
+      setIsEditingPlan(false);
+      return;
+    }
+    setIsEditingPlan(true);
   }
 
   const isLowRisk = assessment?.risk_category === "low";
@@ -460,10 +475,18 @@ export default function Dashboard() {
                     {critiqueFlagged ? "Flagged — review carefully" : "Passed independent review"}
                   </div>
 
-                  <div
-                    className="plan-rendered"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(displayCarePlanText(assessment.draft_plan)) }}
-                  />
+                  {isEditingPlan ? (
+                    <textarea
+                      className="plan-editor"
+                      value={editedDraftPlan}
+                      onChange={(e) => setEditedDraftPlan(e.target.value)}
+                    />
+                  ) : (
+                    <div
+                      className="plan-rendered"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(displayCarePlanText(assessment.draft_plan)) }}
+                    />
+                  )}
 
                   <details>
                     <summary>View critique notes</summary>
@@ -501,12 +524,18 @@ export default function Dashboard() {
                       <div className="action-buttons">
                         <button
                           className="btn approve"
-                          disabled={savingDecision}
-                          onClick={() => recordDecision("approved")}
+                          disabled={savingDecision || (isEditingPlan && !editedDraftPlan.trim())}
+                          onClick={() => recordDecision("approved", isEditingPlan ? editedDraftPlan.trim() : null)}
                         >
-                          Approve
+                          {isEditingPlan ? "Approve edited plan" : "Approve"}
                         </button>
-                        <button className="btn edit" disabled>Edit</button>
+                        <button
+                          className="btn edit"
+                          disabled={savingDecision}
+                          onClick={toggleEditPlan}
+                        >
+                          {isEditingPlan ? "Cancel edit" : "Edit"}
+                        </button>
                         <button
                           className="btn reject"
                           disabled={savingDecision}
@@ -515,7 +544,7 @@ export default function Dashboard() {
                           Reject
                         </button>
                       </div>
-                      <div className="btn-note">Edit is not wired yet.</div>
+                      {isEditingPlan && <div className="btn-note">Edits are saved when the edited plan is approved.</div>}
                     </>
                   ) : (
                     <p className="auth-role-note">A clinician role is required to record a decision.</p>

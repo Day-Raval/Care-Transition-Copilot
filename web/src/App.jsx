@@ -10,8 +10,6 @@ const NAV_ITEMS = [
   { label: "Ask a question", path: "/chat", enabled: true },
   { label: "Patients", path: "/patients", enabled: true },
   { label: "Care plans", path: "/care-plans", enabled: true },
-  { label: "Fairness", path: null, enabled: false },
-  { label: "Audit log", path: null, enabled: false },
 ];
 
 function Sidebar() {
