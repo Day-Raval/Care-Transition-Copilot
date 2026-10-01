@@ -52,3 +52,7 @@ results/*.jsonl
 # kafka
 *.log
 kafka_*/
+
+#archify
+archify-workflow-*/
+.archify/
