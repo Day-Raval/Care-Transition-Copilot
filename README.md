@@ -321,6 +321,13 @@ The current repository shows the first stage of the MVP working locally:
 - Rebranded the care-plan third section from "Documentation gaps" to
   "Additional review notes" and suppressed raw "no relevant documentation
   found" lines in the UI.
+- Added asynchronous background care plan pre-generation in `src/api/precompute.py`.
+  High-risk patients can have their draft plans, retrieval context, and critiques
+  precomputed upon discharge, at API startup (`PRECOMPUTE_ON_STARTUP=true`), via
+  `POST /tasks/precompute-assessments`, or using `scripts/precompute_assessments.py`.
+  Precomputed plans are persisted and cached, dropping UI load time from ~10s to <10ms,
+  with in-flight request deduplication to prevent duplicate LLM calls.
+
 
 Committed processed data currently includes:
 
@@ -671,17 +678,20 @@ python -m src.agents.retrieval_agent <patient_id> --dynamic
 python -m src.agents.risk_tool <patient_id>
 python -m src.agents.orchestrator <patient_id>
 python -m src.agents.chat_agent "For patient <patient_id>, what medications and follow-up needs are documented?"
+python scripts/precompute_assessments.py --category high --limit 10
 ```
 
 ### Running tests
 
 ```bash
 python -m unittest tests.test_decision_idempotency
+python -m unittest tests.test_precompute
 ```
 
-The current automated test covers idempotent decision writes for both local
-SQLite persistence and the SQL-backed database path, including saved care-plan
-reads. The modeling and retrieval checks are still run through the analysis
+The current automated tests cover idempotent decision writes for both local
+SQLite persistence and the SQL-backed database path, as well as the background
+precomputation worker, patient-event deduplication, and saved care-plan retrieval.
+The modeling and retrieval checks are still run through the analysis
 scripts above.
 
 ## Project structure

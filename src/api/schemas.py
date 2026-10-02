@@ -125,3 +125,23 @@ class DriftReport(BaseModel):
     feature_drift: dict
     prediction_drift: dict | None
     disclaimer: str
+
+
+class PrecomputeRequest(BaseModel):
+    category: str | None = Field(default="high", description="Filter by risk category ('high', 'medium', or None for all)")
+    limit: int = Field(default=10, ge=1, le=100, description="Maximum number of patient plans to precompute")
+    force: bool = Field(default=False, description="Re-generate even if already cached/persisted")
+
+
+class PrecomputeStatus(BaseModel):
+    status: str
+    total: int
+    completed: int
+    failed: int
+    skipped: int
+    in_progress_patient_id: str | None = None
+    current_index: int
+    started_at: str | None = None
+    last_completed_at: str | None = None
+    errors: list[dict]
+

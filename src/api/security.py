@@ -69,4 +69,6 @@ def required_roles(method: str, path: str) -> set[str] | None:
         return {"care_coordinator", "clinician", "admin"}
     if method == "POST" and path == "/chat":
         return {"care_coordinator", "clinician", "admin"}
+    if path.startswith("/tasks/precompute"):
+        return {"care_coordinator", "clinician", "admin"}
     return set()

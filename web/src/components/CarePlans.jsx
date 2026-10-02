@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAssessment, getQueue } from "../api.js";
+import { getAssessment, getPrecomputeStatus, getQueue, triggerPrecompute } from "../api.js";
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
@@ -12,6 +12,8 @@ export default function CarePlans() {
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [error, setError] = useState(null);
+  const [precomputing, setPrecomputing] = useState(false);
+  const [precomputeStatus, setPrecomputeStatus] = useState(null);
   const isLowRisk = assessment?.risk_category === "low";
 
   useEffect(() => {
@@ -19,7 +21,47 @@ export default function CarePlans() {
       .then(setPatients)
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPatients(false));
+
+    getPrecomputeStatus()
+      .then((st) => {
+        if (st && st.status === "running") {
+          setPrecomputing(true);
+          setPrecomputeStatus(st);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let interval = null;
+    if (precomputing) {
+      interval = setInterval(() => {
+        getPrecomputeStatus()
+          .then((status) => {
+            setPrecomputeStatus(status);
+            if (status.status === "idle") {
+              setPrecomputing(false);
+            }
+          })
+          .catch(() => setPrecomputing(false));
+      }, 1500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [precomputing]);
+
+  function handlePrecompute() {
+    setPrecomputing(true);
+    triggerPrecompute({ category: "high", limit: 10 })
+      .then((res) => {
+        setPrecomputeStatus(res.status);
+      })
+      .catch((e) => {
+        setError(e.message);
+        setPrecomputing(false);
+      });
+  }
 
   function selectPatient(patient) {
     setSelected(patient);
@@ -37,6 +79,27 @@ export default function CarePlans() {
       <div className="panel">
         <h2>Care plans</h2>
         <p className="panel-subtitle">Select a patient to view the generated follow-up plan</p>
+
+        <div style={{ margin: "12px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+          <button
+            className="action-button secondary"
+            style={{ fontSize: "0.82rem", padding: "6px 12px", cursor: precomputing ? "not-allowed" : "pointer" }}
+            onClick={handlePrecompute}
+            disabled={precomputing}
+          >
+            {precomputing ? "⏳ Precomputing in background..." : "⚡ Precompute High-Risk Plans"}
+          </button>
+          {precomputeStatus && precomputeStatus.status === "running" && (
+            <span style={{ fontSize: "0.8rem", color: "#147c78", fontWeight: 500 }}>
+              [{precomputeStatus.current_index}/{precomputeStatus.total || "?"}] In progress...
+            </span>
+          )}
+          {precomputeStatus && precomputeStatus.status === "idle" && precomputeStatus.completed > 0 && (
+            <span style={{ fontSize: "0.78rem", color: "#2e7d32", fontWeight: 500 }}>
+              ✓ {precomputeStatus.completed} cached plans ready (<10ms load)
+            </span>
+          )}
+        </div>
 
         {loadingPatients && <LoadingState>Loading patients...</LoadingState>}
         {!loadingPatients && patients.length === 0 && (

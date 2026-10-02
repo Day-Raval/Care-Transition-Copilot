@@ -15,7 +15,7 @@ Each spec: (python_type, ge, le, description). ge/le of None means
 
 FEATURE_SPECS = {
     "age_at_discharge": (int, 0, 120, "Patient age in completed years at discharge"),
-    "length_of_stay_days": (int, 0, 365, "Length of the hospital stay in calendar days"),
+    "length_of_stay_days": (int, 0, None, "Length of the hospital stay in calendar days"),
     "medication_count": (int, 0, None, "Distinct active medications at discharge (180-day lookback)"),
     "prior_admissions_90d": (int, 0, None, "Prior inpatient episodes in the 90 days before this admission"),
     "comorbidity_count": (int, 0, None, "Number of flagged chronic comorbidity categories (tested, currently excluded from production — see results/RESULTS.md)"),

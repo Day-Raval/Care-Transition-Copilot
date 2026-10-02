@@ -303,6 +303,35 @@ def read_care_plans(limit: int = 100) -> list[dict[str, Any]]:
     return read_jsonl(CARE_PLANS_PATH, limit=limit)
 
 
+def latest_saved_care_plan(
+    patient_id: str, discharge_ts: str | None = None
+) -> dict[str, Any] | None:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            query = """
+                SELECT payload_json
+                FROM care_plans
+                WHERE patient_id = :patient_id
+            """
+            params: dict[str, Any] = {"patient_id": patient_id}
+            if discharge_ts is not None:
+                query += " AND discharge_ts = :discharge_ts"
+                params["discharge_ts"] = discharge_ts
+            query += " ORDER BY timestamp DESC, id DESC LIMIT 1"
+            row = conn.execute(text(query), params).fetchone()
+            if row:
+                return json.loads(row.payload_json)
+            return None
+
+    plans = read_jsonl(CARE_PLANS_PATH, limit=10000)
+    for p in reversed(plans):
+        if p.get("patient_id") == patient_id:
+            if discharge_ts is None or p.get("discharge_ts") == discharge_ts:
+                return p
+    return None
+
+
 def notify_care_plan_decision(
     patient_id: str,
     discharge_ts: str,

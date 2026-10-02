@@ -335,6 +335,65 @@ function WorkflowTimeline({ steps }) {
   );
 }
 
+function evidenceQualityItems(assessment, evidenceSections) {
+  if (!assessment) return [];
+  const sources = new Set();
+  let excerptCount = 0;
+  evidenceSections.forEach((section) => {
+    section.rows.forEach((row) => {
+      sources.add(row.source);
+      excerptCount += 1;
+    });
+  });
+  const missing = assessment.categories_with_no_match || [];
+  const isLowRisk = assessment.risk_category === "low";
+  return [
+    {
+      label: "Provenance",
+      status: excerptCount > 0 ? "ok" : isLowRisk ? "neutral" : "warn",
+      detail: excerptCount > 0
+        ? `${excerptCount} cited excerpt${excerptCount === 1 ? "" : "s"} from ${sources.size} source${sources.size === 1 ? "" : "s"}`
+        : isLowRisk
+          ? "Full retrieval skipped by the low-risk gate"
+          : "No cited excerpts returned",
+    },
+    {
+      label: "Completeness",
+      status: missing.length === 0 ? "ok" : "warn",
+      detail: missing.length === 0
+        ? "No missing retrieval categories reported"
+        : `${missing.length} missing categor${missing.length === 1 ? "y" : "ies"}: ${missing.join("; ")}`,
+    },
+    {
+      label: "Patient scope",
+      status: "ok",
+      detail: "Evidence is scoped to the selected patient episode before display",
+    },
+    {
+      label: "Human oversight",
+      status: "ok",
+      detail: "Draft remains pending until a clinician approves or rejects it",
+    },
+  ];
+}
+
+function EvidenceQualitySummary({ items }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="evidence-quality">
+      <div className="cited-context-title">Evidence quality</div>
+      <div className="quality-grid">
+        {items.map((item) => (
+          <div className={`quality-item ${item.status}`} key={item.label}>
+            <div className="quality-label">{item.label}</div>
+            <div className="quality-detail">{item.detail}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { canDecide } = useAuth();
   const [queue, setQueue] = useState([]);
@@ -373,7 +432,7 @@ export default function Dashboard() {
       .then(([assessmentResult, decisionResult]) => {
         setAssessment(assessmentResult);
         setDecision(decisionResult);
-        setEditedDraftPlan(displayCarePlanText(assessmentResult.draft_plan));
+        setEditedDraftPlan(displayCarePlanText(decisionResult?.draft_plan || assessmentResult.draft_plan));
         if (decisionResult) loadReport(item);
       })
       .catch((e) => setError(e.message))
@@ -406,7 +465,7 @@ export default function Dashboard() {
 
   function toggleEditPlan() {
     if (isEditingPlan) {
-      setEditedDraftPlan(displayCarePlanText(assessment?.draft_plan));
+      setEditedDraftPlan(displayedDraftPlan);
       setIsEditingPlan(false);
       return;
     }
@@ -415,9 +474,12 @@ export default function Dashboard() {
 
   const isLowRisk = assessment?.risk_category === "low";
   const critiqueFlagged = assessment?.critique_notes?.toUpperCase().includes("FLAGGED");
+  const displayedDraftPlan = displayCarePlanText(decision?.draft_plan || assessment?.draft_plan || "");
+  const decisionRejected = decision?.decision === "rejected";
 
   const evidenceSections = buildEvidenceDisplaySections(assessment?.patient_context_summary);
   const timelineSteps = workflowSteps(assessment, decision, report, evidenceSections);
+  const qualityItems = evidenceQualityItems(assessment, evidenceSections);
 
   return (
     <div>
@@ -467,6 +529,7 @@ export default function Dashboard() {
               </div>
 
               <WorkflowTimeline steps={timelineSteps} />
+              <EvidenceQualitySummary items={qualityItems} />
 
               {isLowRisk ? (
                 <p className="muted">Low risk — full chart review was skipped.</p>
@@ -548,7 +611,7 @@ export default function Dashboard() {
                   ) : (
                     <div
                       className="plan-rendered"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(displayCarePlanText(assessment.draft_plan)) }}
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(displayedDraftPlan) }}
                     />
                   )}
 
@@ -571,6 +634,39 @@ export default function Dashboard() {
                         <div className="report-status rejected">
                           {report.message}
                         </div>
+                      )}
+                      {decisionRejected && canDecide && (
+                        <>
+                          <div className="action-buttons">
+                            {isEditingPlan ? (
+                              <>
+                                <button
+                                  className="btn approve"
+                                  disabled={savingDecision || !editedDraftPlan.trim()}
+                                  onClick={() => recordDecision("approved", editedDraftPlan.trim())}
+                                >
+                                  Approve edited plan
+                                </button>
+                                <button
+                                  className="btn edit"
+                                  disabled={savingDecision}
+                                  onClick={toggleEditPlan}
+                                >
+                                  Cancel edit
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="btn edit"
+                                disabled={savingDecision}
+                                onClick={toggleEditPlan}
+                              >
+                                Edit rejected draft
+                              </button>
+                            )}
+                          </div>
+                          {isEditingPlan && <div className="btn-note">Approving saves the edited plan and regenerates the report status.</div>}
+                        </>
                       )}
                       {report?.report_markdown && (
                         <div className="report-preview">

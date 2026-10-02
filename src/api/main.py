@@ -32,6 +32,8 @@ INCONCLUSIVE, not passed (see results/RESULTS.md) — every response
 carries that disclaimer.
 """
 
+from __future__ import annotations
+
 import logging
 import hashlib
 import json
@@ -40,6 +42,7 @@ import sys
 import threading
 import time
 import uuid
+from typing import Any
 
 import jwt
 import pandas as pd
@@ -60,6 +63,7 @@ from src.api.production import (
     build_transition_report,
     init_decision_db,
     latest_decision,
+    latest_saved_care_plan,
     load_discharge_records,
     log_audit_event,
     notify_care_plan_decision,
@@ -73,6 +77,7 @@ from src.api.production import (
     save_transition_report,
     set_audit_request_id,
 )
+from src.api.precompute import precompute_manager
 from src.api.security import OIDCConfigurationError, required_roles, verify_oidc_access_token
 from src.api.schemas import (
     ChatRequest,
@@ -82,6 +87,8 @@ from src.api.schemas import (
     DriftReport,
     FullAssessment,
     ModelInfo,
+    PrecomputeRequest,
+    PrecomputeStatus,
     QueueItem,
     RiskPrediction,
     TransitionReport,
@@ -286,32 +293,53 @@ def _latest_discharge_ts(patient_id: str, discharge_ts: str | None = None) -> st
 
 def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment | None:
     ttl = _cache_ttl_seconds()
-    if ttl <= 0:
-        return None
     key = (patient_id, discharge_ts)
-    redis_client = _redis_cache_client()
-    if redis_client is not None:
-        try:
-            cached_json = redis_client.get(_assessment_cache_key(*key))
-            if cached_json:
-                payload = json.loads(cached_json)
-                with _state["assessment_cache_lock"]:
-                    _state["assessment_cache"][key] = (
-                        time.monotonic() + ttl,
-                        payload,
-                    )
-                return FullAssessment(**payload)
-        except Exception as exc:
-            logger.warning("Redis assessment cache read failed; using in-memory cache: %s", exc)
-    with _state["assessment_cache_lock"]:
-        cached = _state["assessment_cache"].get(key)
-        if not cached:
-            return None
-        expires_at, payload = cached
-        if expires_at < time.monotonic():
-            _state["assessment_cache"].pop(key, None)
-            return None
-    return FullAssessment(**payload)
+    if ttl > 0:
+        redis_client = _redis_cache_client()
+        if redis_client is not None:
+            try:
+                cached_json = redis_client.get(_assessment_cache_key(*key))
+                if cached_json:
+                    payload = json.loads(cached_json)
+                    with _state["assessment_cache_lock"]:
+                        _state["assessment_cache"][key] = (
+                            time.monotonic() + ttl,
+                            payload,
+                        )
+                    return FullAssessment(**payload)
+            except Exception as exc:
+                logger.warning("Redis assessment cache read failed; using in-memory cache: %s", exc)
+        with _state["assessment_cache_lock"]:
+            cached = _state["assessment_cache"].get(key)
+            if cached:
+                expires_at, payload = cached
+                if expires_at >= time.monotonic():
+                    return FullAssessment(**payload)
+                else:
+                    _state["assessment_cache"].pop(key, None)
+
+    # Check persistence backend (saved care plans)
+    saved = latest_saved_care_plan(patient_id, discharge_ts)
+    if saved and "draft_plan" in saved and "patient_name" in saved:
+        payload = {
+            "patient_id": saved["patient_id"],
+            "discharge_ts": str(saved.get("discharge_ts", discharge_ts)),
+            "patient_name": saved["patient_name"],
+            "risk_score": float(saved.get("risk_score", 0.0)),
+            "risk_percentile": float(saved.get("risk_percentile", 0.0)),
+            "risk_category": saved.get("risk_category", "medium"),
+            "admission_reason": saved.get("admission_reason", ""),
+            "patient_context_summary": saved.get("patient_context_summary", ""),
+            "categories_with_no_match": saved.get("categories_with_no_match", []),
+            "draft_plan": saved["draft_plan"],
+            "critique_notes": saved.get("critique_notes", ""),
+            "disclaimer": DISCLAIMER,
+        }
+        assessment = FullAssessment(**payload)
+        _assessment_cache_set(assessment)
+        return assessment
+
+    return None
 
 
 def _assessment_cache_set(assessment: FullAssessment) -> None:
@@ -368,9 +396,12 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
             "patient_id": assessment.patient_id,
             "discharge_ts": assessment.discharge_ts,
             "patient_name": assessment.patient_name,
+            "risk_score": assessment.risk_score,
             "risk_category": assessment.risk_category,
             "risk_percentile": assessment.risk_percentile,
             "admission_reason": assessment.admission_reason,
+            "patient_context_summary": assessment.patient_context_summary,
+            "categories_with_no_match": assessment.categories_with_no_match,
             "draft_plan": assessment.draft_plan,
             "critique_notes": assessment.critique_notes,
             "model_run_id": _state["run_id"],
@@ -385,6 +416,34 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
     )
     _assessment_cache_set(assessment)
     return assessment
+
+
+def _queue_candidates() -> list[dict[str, Any]]:
+    if not _state or "queue_df" not in _state:
+        return []
+    queue_df = _state["queue_df"]
+    scores = _state["reference_scores"]
+    candidates = []
+    for i in range(len(queue_df)):
+        risk_score = float(scores[i])
+        percentile = float((scores < risk_score).mean() * 100)
+        cat = _categorize(percentile)
+        candidates.append({
+            "patient_id": str(queue_df.iloc[i]["patient_id"]),
+            "patient_name": str(queue_df.iloc[i]["patient_name"]),
+            "discharge_ts": str(queue_df.iloc[i]["discharge_ts"]),
+            "admission_reason": str(queue_df.iloc[i]["admission_reason"]),
+            "risk_score": round(risk_score, 4),
+            "risk_percentile": round(percentile, 1),
+            "risk_category": cat,
+        })
+    candidates.sort(key=lambda x: x["risk_score"], reverse=True)
+    return candidates
+
+
+def _is_assessment_ready(patient_id: str, discharge_ts: str) -> bool:
+    return _assessment_cache_get(patient_id, discharge_ts) is not None
+
 
 
 @app.on_event("startup")
@@ -449,6 +508,17 @@ def load_production_model():
         )
 
     app.add_api_route("/predict", predict, methods=["POST"], response_model=RiskPrediction)
+
+    if os.getenv("PRECOMPUTE_ON_STARTUP", "false").lower() == "true":
+        logger.info("PRECOMPUTE_ON_STARTUP is enabled; launching background care plan precomputation")
+        precompute_manager.start_background_precompute(
+            get_candidates_fn=_queue_candidates,
+            generate_fn=_generate_assessment,
+            is_cached_fn=_is_assessment_ready,
+            categories=["high"],
+            limit=int(os.getenv("PRECOMPUTE_STARTUP_LIMIT", "10")),
+            force=False,
+        )
 
 
 @app.get("/health")
@@ -523,8 +593,9 @@ def patient_queue(limit: int = 50, category: str | None = None):
 def patient_assessment(patient_id: str, discharge_ts: str | None = None):
     """
     Runs the full orchestrator graph (risk -> retrieval -> reasoning ->
-    critique) for one patient. Makes real LLM calls — slower and costs
-    real API usage, unlike /patients which is pre-computed.
+    critique) for one patient. If precomputed/cached, returns instantly.
+    If currently being generated by a background task or concurrent request,
+    waits on the in-flight event rather than triggering duplicate LLM calls.
     """
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -533,7 +604,20 @@ def patient_assessment(patient_id: str, discharge_ts: str | None = None):
     cached = _assessment_cache_get(patient_id, episode_discharge_ts)
     if cached is not None:
         return cached
-    return _generate_assessment(patient_id, episode_discharge_ts)
+
+    evt, is_creator = precompute_manager.get_patient_event(patient_id, episode_discharge_ts)
+    if not is_creator:
+        evt.wait(timeout=120)
+        cached = _assessment_cache_get(patient_id, episode_discharge_ts)
+        if cached is not None:
+            return cached
+
+    try:
+        return _generate_assessment(patient_id, episode_discharge_ts)
+    finally:
+        if is_creator:
+            precompute_manager.finish_patient_event(patient_id, episode_discharge_ts)
+
 
 
 @app.get("/patients/{patient_id}/decision", response_model=DecisionRecord | None)
@@ -669,3 +753,36 @@ def chat(request: ChatRequest):
             for tc in result["tool_calls"]
         ],
     )
+
+
+@app.post("/tasks/precompute-assessments", status_code=202)
+def launch_precompute_task(
+    body: PrecomputeRequest | None = None,
+    category: str | None = None,
+    limit: int = 10,
+    force: bool = False,
+):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    req_category = (body.category if body else None) or category or "high"
+    req_limit = (body.limit if body else None) or limit or 10
+    req_force = (body.force if body else None) or force or False
+
+    categories = [c.strip() for c in req_category.split(",") if c.strip()] if req_category else None
+
+    result = precompute_manager.start_background_precompute(
+        get_candidates_fn=_queue_candidates,
+        generate_fn=_generate_assessment,
+        is_cached_fn=_is_assessment_ready,
+        categories=categories,
+        limit=req_limit,
+        force=req_force,
+    )
+    return result
+
+
+@app.get("/tasks/precompute-assessments/status", response_model=PrecomputeStatus)
+def precompute_task_status():
+    return precompute_manager.get_status()
+

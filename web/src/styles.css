@@ -289,6 +289,38 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
 .workflow-label { font-size: 12px; font-weight: 700; color: var(--navy); }
 .workflow-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+.evidence-quality {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #FFFFFF;
+}
+.quality-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.quality-item {
+  border-left: 3px solid var(--text-muted);
+  padding-left: 8px;
+}
+.quality-item.ok { border-left-color: var(--ok); }
+.quality-item.warn { border-left-color: var(--warn); }
+.quality-item.neutral { border-left-color: #B0B4BC; }
+.quality-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+}
+.quality-detail {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .operations-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);

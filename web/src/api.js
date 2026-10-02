@@ -112,3 +112,18 @@ export function getModelInfo() {
   return request("/model-info");
 }
 
+export function triggerPrecompute({ category = "high", limit = 10, force = false } = {}) {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (limit) params.set("limit", String(limit));
+  if (force) params.set("force", "true");
+  return request(`/tasks/precompute-assessments?${params}`, {
+    method: "POST",
+  });
+}
+
+export function getPrecomputeStatus() {
+  return request("/tasks/precompute-assessments/status");
+}
+
+

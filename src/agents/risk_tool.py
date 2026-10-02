@@ -51,6 +51,38 @@ def get_patient_features(patient_id: str, discharge_ts: str | None = None) -> di
 
 
 def assess_risk(patient_id: str, discharge_ts: str | None = None) -> dict:
+    # 1. In-process optimization: if running inside the API server or worker, use pre-scored reference directly
+    try:
+        from src.api.main import _categorize, _state
+        if _state and "queue_df" in _state and "reference_scores" in _state:
+            queue_df = _state["queue_df"]
+            scores = _state["reference_scores"]
+            matches = queue_df[queue_df["patient_id"] == patient_id]
+            if discharge_ts is not None:
+                matches = matches[matches["discharge_ts"].astype(str) == str(discharge_ts)]
+            if not matches.empty:
+                idx = matches.index[-1]
+                score = float(scores[idx])
+                percentile = float((scores < score).mean() * 100)
+                cat = _categorize(percentile)
+                row = matches.iloc[-1]
+                return {
+                    "risk_score": round(score, 4),
+                    "risk_percentile": round(percentile, 1),
+                    "risk_category": cat,
+                    "model_run_id": str(_state.get("run_id", "")),
+                    "admission_reason": str(row.get("admission_reason", "unknown")),
+                    "patient_name": str(row.get("patient_name", "Unknown Patient")),
+                    "disclaimer": (
+                        "Research/portfolio baseline model. Trained on ~52 positive events — "
+                        "treat as directional, not precise. Fairness audit INCONCLUSIVE for "
+                        "sex and race at current dataset size (see results/RESULTS.md)."
+                    ),
+                }
+    except Exception:
+        pass
+
+    # 2. Standalone fallback: query the Model Serving API over HTTP
     features, admission_reason, patient_name = get_patient_features(patient_id, discharge_ts)
     api_key = os.getenv("API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}
@@ -69,7 +101,13 @@ def assess_risk(patient_id: str, discharge_ts: str | None = None) -> dict:
             f"after {RISK_API_TIMEOUT_SECONDS:.0f} seconds."
         )
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Risk API request failed: {e}")
+        detail = ""
+        if getattr(e, "response", None) is not None:
+            try:
+                detail = f" - {e.response.json()}"
+            except Exception:
+                detail = f" - {e.response.text}"
+        raise RuntimeError(f"Risk API request failed: {e}{detail}")
 
     result = response.json()
     result["admission_reason"] = admission_reason
