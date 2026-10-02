@@ -63,12 +63,15 @@ from src.api.production import (
     load_discharge_records,
     log_audit_event,
     notify_care_plan_decision,
+    read_audit_events,
     read_care_plans,
     read_notifications,
+    reset_audit_request_id,
     runtime_dependency_report,
     save_care_plan,
     save_decision,
     save_transition_report,
+    set_audit_request_id,
 )
 from src.api.security import OIDCConfigurationError, required_roles, verify_oidc_access_token
 from src.api.schemas import (
@@ -127,77 +130,81 @@ _redis_cache = None
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    audit_token = set_audit_request_id(request_id)
     request.state.request_id = request_id
-    path = request.url.path
-    method = request.method
-    if path == "/health" or method == "OPTIONS":
+    try:
+        path = request.url.path
+        method = request.method
+        if path == "/health" or method == "OPTIONS":
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+        auth_mode = os.getenv("AUTH_MODE", "api_key").strip().lower()
+        expected_key = os.getenv("API_KEY")
+        provided_key = request.headers.get("x-api-key")
+        if auth_mode == "oidc" and path == "/predict":
+            if not expected_key or provided_key != expected_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Missing or invalid service API key", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+            request.state.principal = {"sub": "risk_model_service", "roles": [], "auth_mode": "service"}
+        elif auth_mode == "oidc":
+            authorization = request.headers.get("authorization", "")
+            scheme, _, token = authorization.partition(" ")
+            if scheme.lower() != "bearer" or not token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "A bearer access token is required", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+            try:
+                request.state.principal = verify_oidc_access_token(token)
+            except OIDCConfigurationError as exc:
+                logger.error("OIDC authentication is misconfigured: %s", exc)
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "OIDC authentication is not configured", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+            except (jwt.InvalidTokenError, jwt.PyJWKClientError, ValueError):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired bearer access token", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+            allowed_roles = required_roles(method, path)
+            if allowed_roles is not None and not allowed_roles.intersection(request.state.principal["roles"]):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Your role is not authorized for this action", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+        elif auth_mode == "api_key":
+            if not expected_key or provided_key != expected_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Missing or invalid API key", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+            request.state.principal = {
+                "sub": request.headers.get("x-clinician-id", DEFAULT_ACTOR),
+                "roles": ["admin"],
+                "auth_mode": "api_key",
+            }
+        else:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "AUTH_MODE must be 'api_key' or 'oidc'", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
-
-    auth_mode = os.getenv("AUTH_MODE", "api_key").strip().lower()
-    expected_key = os.getenv("API_KEY")
-    provided_key = request.headers.get("x-api-key")
-    if auth_mode == "oidc" and path == "/predict":
-        if not expected_key or provided_key != expected_key:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing or invalid service API key", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-        request.state.principal = {"sub": "risk_model_service", "roles": [], "auth_mode": "service"}
-    elif auth_mode == "oidc":
-        authorization = request.headers.get("authorization", "")
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not token:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "A bearer access token is required", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-        try:
-            request.state.principal = verify_oidc_access_token(token)
-        except OIDCConfigurationError as exc:
-            logger.error("OIDC authentication is misconfigured: %s", exc)
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "OIDC authentication is not configured", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-        except (jwt.InvalidTokenError, jwt.PyJWKClientError, ValueError):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid or expired bearer access token", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-        allowed_roles = required_roles(method, path)
-        if allowed_roles is not None and not allowed_roles.intersection(request.state.principal["roles"]):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Your role is not authorized for this action", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-    elif auth_mode == "api_key":
-        if not expected_key or provided_key != expected_key:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing or invalid API key", "request_id": request_id},
-                headers={"X-Request-ID": request_id},
-            )
-        request.state.principal = {
-            "sub": request.headers.get("x-clinician-id", DEFAULT_ACTOR),
-            "roles": ["admin"],
-            "auth_mode": "api_key",
-        }
-    else:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "AUTH_MODE must be 'api_key' or 'oidc'", "request_id": request_id},
-            headers={"X-Request-ID": request_id},
-        )
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
+    finally:
+        reset_audit_request_id(audit_token)
 
 
 @app.exception_handler(Exception)
@@ -627,6 +634,15 @@ def saved_care_plans(limit: int = 50):
 @app.get("/notifications")
 def saved_notifications(limit: int = 50):
     return read_notifications(limit=limit)
+
+
+@app.get("/audit-events")
+def saved_audit_events(
+    limit: int = 100,
+    patient_id: str | None = None,
+    request_id: str | None = None,
+):
+    return read_audit_events(limit=limit, patient_id=patient_id, request_id=request_id)
 
 
 @app.post("/chat", response_model=ChatResponse)

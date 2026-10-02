@@ -3,6 +3,7 @@ import { AUTH_MODE, getOidcAccessToken } from "./oidc.js";
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
+const CHAT_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS || 120000);
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 const CLINICIAN_ID = import.meta.env.VITE_CLINICIAN_ID || "demo_clinician";
 
@@ -88,9 +89,21 @@ export function getSavedCarePlans(limit = 50) {
   return request(`/care-plans?${new URLSearchParams({ limit })}`);
 }
 
+export function getNotifications(limit = 50) {
+  return request(`/notifications?${new URLSearchParams({ limit })}`);
+}
+
+export function getAuditEvents({ limit = 100, patientId = "", requestId = "" } = {}) {
+  const params = new URLSearchParams({ limit });
+  if (patientId) params.set("patient_id", patientId);
+  if (requestId) params.set("request_id", requestId);
+  return request(`/audit-events?${params}`);
+}
+
 export function sendChatMessage(question) {
   return request("/chat", {
     method: "POST",
+    timeoutMs: CHAT_TIMEOUT_MS,
     body: JSON.stringify({ question }),
   });
 }

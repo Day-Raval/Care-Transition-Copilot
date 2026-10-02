@@ -274,6 +274,67 @@ function buildEvidenceDisplaySections(summary) {
     .filter((section) => section.rows.length > 0);
 }
 
+function workflowSteps(assessment, decision, report, evidenceSections) {
+  if (!assessment) return [];
+  const isLowRisk = assessment.risk_category === "low";
+  const critiqueFlagged = assessment.critique_notes?.toUpperCase().includes("FLAGGED");
+  const steps = [
+    {
+      label: "Risk scored",
+      status: "done",
+      detail: `${assessment.risk_category} risk, ${assessment.risk_percentile.toFixed(1)} percentile`,
+    },
+    {
+      label: "Chart retrieval",
+      status: isLowRisk ? "skipped" : "done",
+      detail: isLowRisk
+        ? "Skipped by low-risk gate"
+        : evidenceSections.length > 0
+          ? `${evidenceSections.length} evidence group${evidenceSections.length === 1 ? "" : "s"} cited`
+          : "No matching excerpts returned",
+    },
+    {
+      label: "Draft plan",
+      status: "done",
+      detail: isLowRisk ? "Low-risk summary ready" : "Draft ready for review",
+    },
+    {
+      label: "Independent critique",
+      status: isLowRisk ? "skipped" : critiqueFlagged ? "warn" : "done",
+      detail: isLowRisk ? "Skipped by low-risk gate" : critiqueFlagged ? "Flagged for careful review" : "No blocking issue flagged",
+    },
+    {
+      label: "Clinician decision",
+      status: decision ? (decision.decision === "approved" ? "done" : "warn") : "pending",
+      detail: decision ? `${decision.decision} by ${decision.actor}` : "Waiting for approve or reject",
+    },
+    {
+      label: "Report handoff",
+      status: report?.status === "approved" ? "done" : report?.status === "rejected_edit_required" ? "warn" : "pending",
+      detail: report?.message || "Generated only after approval",
+    },
+  ];
+  return steps;
+}
+
+function WorkflowTimeline({ steps }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="workflow-timeline">
+      <div className="cited-context-title">Workflow timeline</div>
+      {steps.map((step) => (
+        <div className={`workflow-step ${step.status}`} key={step.label}>
+          <div className="workflow-dot" />
+          <div>
+            <div className="workflow-label">{step.label}</div>
+            <div className="workflow-detail">{step.detail}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { canDecide } = useAuth();
   const [queue, setQueue] = useState([]);
@@ -356,6 +417,7 @@ export default function Dashboard() {
   const critiqueFlagged = assessment?.critique_notes?.toUpperCase().includes("FLAGGED");
 
   const evidenceSections = buildEvidenceDisplaySections(assessment?.patient_context_summary);
+  const timelineSteps = workflowSteps(assessment, decision, report, evidenceSections);
 
   return (
     <div>
@@ -403,6 +465,8 @@ export default function Dashboard() {
                 <span className="pill pill-neutral">{assessment.risk_category} risk</span>
                 <span className="pill pill-neutral">Cited context</span>
               </div>
+
+              <WorkflowTimeline steps={timelineSteps} />
 
               {isLowRisk ? (
                 <p className="muted">Low risk — full chart review was skipped.</p>

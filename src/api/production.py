@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,7 @@ DISCHARGE_RECORDS_TABLE = "discharge_records_with_target"
 
 _engine: Engine | None = None
 _metadata = MetaData()
+_audit_request_id: ContextVar[str | None] = ContextVar("audit_request_id", default=None)
 
 _decisions_table = Table(
     "care_plan_decisions",
@@ -117,6 +119,14 @@ _notifications_table = Table(
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def set_audit_request_id(request_id: str):
+    return _audit_request_id.set(request_id)
+
+
+def reset_audit_request_id(token) -> None:
+    _audit_request_id.reset(token)
 
 
 def database_requested() -> bool:
@@ -189,7 +199,10 @@ def read_jsonl(path: Path, limit: int = 100) -> list[dict[str, Any]]:
 
 
 def log_audit_event(event_type: str, **payload: Any) -> None:
+    request_id = payload.pop("request_id", None) or _audit_request_id.get()
     record = {"timestamp": utc_now(), "event_type": event_type, **payload}
+    if request_id:
+        record["request_id"] = request_id
     if use_database():
         init_decision_db()
         with _db_engine().begin() as conn:
@@ -209,6 +222,47 @@ def log_audit_event(event_type: str, **payload: Any) -> None:
         return
     append_jsonl(AUDIT_LOG_PATH, record)
     publish_audit_event(event_type, record)
+
+
+def read_audit_events(
+    limit: int = 100,
+    patient_id: str | None = None,
+    request_id: str | None = None,
+) -> list[dict[str, Any]]:
+    limit = min(max(limit, 1), 500)
+    if use_database():
+        init_decision_db()
+        clauses = []
+        params: dict[str, Any] = {"limit": limit}
+        if patient_id:
+            clauses.append("patient_id = :patient_id")
+            params["patient_id"] = patient_id
+        if request_id:
+            clauses.append("request_id = :request_id")
+            params["request_id"] = request_id
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    f"""
+                    SELECT payload_json
+                    FROM audit_events
+                    {where}
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            )
+            return [json.loads(row.payload_json) for row in rows]
+
+    # ponytail: JSONL scan is fine for local demo; push filters into storage when audit logs are large.
+    events = read_jsonl(AUDIT_LOG_PATH, limit=10000)
+    if patient_id:
+        events = [event for event in events if event.get("patient_id") == patient_id]
+    if request_id:
+        events = [event for event in events if event.get("request_id") == request_id]
+    return events[:limit]
 
 
 def save_care_plan(record: dict[str, Any]) -> None:

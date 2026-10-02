@@ -3,6 +3,7 @@ import Dashboard from "./components/Dashboard.jsx";
 import ChatInterface from "./components/ChatInterface.jsx";
 import Patients from "./components/Patients.jsx";
 import CarePlans from "./components/CarePlans.jsx";
+import Operations from "./components/Operations.jsx";
 import { AuthProvider, useAuth } from "./AuthContext.jsx";
 
 const NAV_ITEMS = [
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
   { label: "Ask a question", path: "/chat", enabled: true },
   { label: "Patients", path: "/patients", enabled: true },
   { label: "Care plans", path: "/care-plans", enabled: true },
+  { label: "Operations", path: "/operations", enabled: true },
 ];
 
 function Sidebar() {
@@ -86,6 +88,7 @@ function AuthenticatedApp() {
             <Route path="/chat" element={<ChatInterface />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/care-plans" element={<CarePlans />} />
+            <Route path="/operations" element={<Operations />} />
           </Routes>
           {!canDecide && <p className="auth-role-note">Read-only access</p>}
         </div>
