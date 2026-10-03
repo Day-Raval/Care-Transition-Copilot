@@ -145,3 +145,32 @@ class PrecomputeStatus(BaseModel):
     last_completed_at: str | None = None
     errors: list[dict]
 
+
+class HL7IntakeRequest(BaseModel):
+    raw_message: str = Field(..., min_length=5, description="Raw pipe-delimited HL7v2 message (ADT^A03)")
+
+
+class DischargeEventTriggerRequest(BaseModel):
+    patient_id: str = Field(..., description="Patient ID / MRN")
+    discharge_ts: str | None = Field(default=None, description="Discharge timestamp (ISO or HL7 format)")
+    admit_ts: str | None = Field(default=None, description="Admit timestamp")
+    encounter_id: str | None = Field(default=None, description="Encounter ID")
+    patient_name: str | None = Field(default=None, description="Patient name")
+    admission_reason: str | None = Field(default=None, description="Primary diagnosis or admission reason")
+    fhir_bundle: dict | None = Field(default=None, description="Optional embedded FHIR bundle with clinical resources")
+
+
+class IntakeResultResponse(BaseModel):
+    status: str
+    patient_id: str
+    encounter_id: str
+    discharge_ts: str
+    patient_name: str
+    admission_reason: str
+    features: dict
+    risk_score: float
+    risk_percentile: float
+    risk_category: str
+    precompute_triggered: bool
+    published_to_kafka: bool
+

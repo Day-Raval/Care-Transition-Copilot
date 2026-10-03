@@ -84,8 +84,11 @@ from src.api.schemas import (
     ChatResponse,
     DecisionRecord,
     DecisionRequest,
+    DischargeEventTriggerRequest,
     DriftReport,
     FullAssessment,
+    HL7IntakeRequest,
+    IntakeResultResponse,
     ModelInfo,
     PrecomputeRequest,
     PrecomputeStatus,
@@ -94,6 +97,8 @@ from src.api.schemas import (
     TransitionReport,
     build_patient_features_model,
 )
+from src.data_services.consumer import KafkaEventConsumer, get_kafka_consumer
+from src.ingestion.hl7_intake import process_realtime_intake
 from src.model.experiment_registry import load_model
 from src.utils.config import load_config
 from src.utils.logging_config import setup_logging
@@ -520,6 +525,15 @@ def load_production_model():
             force=False,
         )
 
+    if os.getenv("KAFKA_CONSUMER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            logger.info("KAFKA_CONSUMER_ENABLED is true; starting background Kafka event consumer")
+            consumer = get_kafka_consumer()
+            consumer.start()
+            _state["kafka_consumer"] = consumer
+        except Exception as ce:
+            logger.error("Failed to start background Kafka consumer: %s", ce)
+
 
 @app.get("/health")
 def health():
@@ -527,10 +541,12 @@ def health():
         raise HTTPException(status_code=503, detail="Model not loaded")
     dependencies = runtime_dependency_report(_state.get("config", load_config()))
     _state["runtime_dependencies"] = dependencies
+    consumer = _state.get("kafka_consumer")
     return {
         "status": "ok" if dependencies["ready"] else "degraded",
         "model_run_id": _state["run_id"],
         "dependencies": dependencies,
+        "kafka_consumer": consumer.stats if consumer else {"status": "disabled"},
     }
 
 
@@ -785,4 +801,54 @@ def launch_precompute_task(
 @app.get("/tasks/precompute-assessments/status", response_model=PrecomputeStatus)
 def precompute_task_status():
     return precompute_manager.get_status()
+
+
+@app.post("/intake/hl7-adt", response_model=IntakeResultResponse)
+def intake_hl7_adt(request: HL7IntakeRequest):
+    """
+    Real-time HL7v2 intake gateway endpoint. Accepts ADT^A03 discharge messages,
+    extracts patient context, derives risk features, computes 30-day readmission
+    risk, triggers proactive precomputations, and publishes to Kafka.
+    """
+    try:
+        result = process_realtime_intake(request.raw_message, trigger_precompute=True)
+        return IntakeResultResponse(**result)
+    except Exception as exc:
+        logger.error("HL7 intake processing failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"HL7 intake error: {exc}")
+
+
+@app.post("/intake/discharge-event", response_model=IntakeResultResponse)
+def intake_discharge_event(request: DischargeEventTriggerRequest):
+    """
+    Structured real-time discharge event intake endpoint.
+    Accepts patient/encounter discharge metadata or embedded FHIR resources.
+    """
+    try:
+        event_dict = {
+            "patient_id": request.patient_id,
+            "discharge_ts": request.discharge_ts,
+            "admit_ts": request.admit_ts,
+            "encounter_id": request.encounter_id,
+            "patient_name": request.patient_name,
+            "admission_reason": request.admission_reason,
+        }
+        result = process_realtime_intake(
+            adt_input=event_dict,
+            fhir_bundle=request.fhir_bundle,
+            trigger_precompute=True,
+        )
+        return IntakeResultResponse(**result)
+    except Exception as exc:
+        logger.error("Discharge event intake failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Discharge event error: {exc}")
+
+
+@app.on_event("shutdown")
+def shutdown_background_workers():
+    consumer = _state.get("kafka_consumer")
+    if consumer:
+        logger.info("Stopping Kafka consumer on application shutdown...")
+        consumer.stop()
+
 

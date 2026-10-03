@@ -31,6 +31,14 @@ def discharge_episodes_topic() -> str:
     return _topic("KAFKA_TOPIC_EPISODES", "care-transition.discharge-episodes")
 
 
+def dlq_topic() -> str:
+    return _topic("KAFKA_TOPIC_DLQ", "care-transition.dlq")
+
+
+def consumer_group_id() -> str:
+    return os.getenv("KAFKA_CONSUMER_GROUP_ID", "care-transition-copilot-consumers").strip()
+
+
 def _bootstrap_servers() -> str:
     return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "").strip()
 
@@ -51,6 +59,17 @@ def _producer_config() -> dict[str, Any]:
         "enable.idempotence": True,
         "acks": "all",
         "message.timeout.ms": int(os.getenv("KAFKA_MESSAGE_TIMEOUT_MS", "5000")),
+    }
+
+
+def consumer_config(group_id: str | None = None) -> dict[str, Any]:
+    return {
+        "bootstrap.servers": _bootstrap_servers(),
+        "group.id": group_id or consumer_group_id(),
+        "auto.offset.reset": os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest"),
+        "enable.auto.commit": os.getenv("KAFKA_ENABLE_AUTO_COMMIT", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "max.poll.interval.ms": int(os.getenv("KAFKA_MAX_POLL_INTERVAL_MS", "300000")),
+        "session.timeout.ms": int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "45000")),
     }
 
 
@@ -128,6 +147,25 @@ def publish_audit_event(event_type: str, payload: dict[str, Any]) -> bool:
 def publish_discharge_episode(payload: dict[str, Any]) -> bool:
     key = payload.get("encounter_id") or payload.get("patient_id")
     return publish_event(discharge_episodes_topic(), "discharge_episode_exported", payload, key=key)
+
+
+def publish_to_dlq(
+    original_topic: str,
+    raw_payload: Any,
+    error: str,
+    error_type: str = "processing_error",
+    retry_count: int = 0,
+    key: str | None = None,
+) -> bool:
+    dlq_payload = {
+        "original_topic": original_topic,
+        "original_payload": raw_payload,
+        "error": str(error),
+        "error_type": error_type,
+        "retry_count": retry_count,
+        "failed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    return publish_event(dlq_topic(), "dead_letter_event", dlq_payload, key=key)
 
 
 def flush_events(timeout: float = 5.0) -> None:
