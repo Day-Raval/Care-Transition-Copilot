@@ -96,7 +96,7 @@ export default function CarePlans() {
           )}
           {precomputeStatus && precomputeStatus.status === "idle" && precomputeStatus.completed > 0 && (
             <span style={{ fontSize: "0.78rem", color: "#2e7d32", fontWeight: 500 }}>
-              ✓ {precomputeStatus.completed} cached plans ready (<10ms load)
+              ✓ {precomputeStatus.completed} cached plans ready (&lt;10ms load)
             </span>
           )}
         </div>

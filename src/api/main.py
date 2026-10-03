@@ -255,6 +255,10 @@ def _assessment_cache_key(patient_id: str, discharge_ts: str) -> str:
     return f"care-transition:assessment:v1:{hashlib.sha256(identity).hexdigest()}"
 
 
+def _assessment_has_required_context(payload: dict[str, Any]) -> bool:
+    return payload.get("risk_category") == "low" or bool(payload.get("patient_context_summary"))
+
+
 def _redis_cache_client():
     redis_url = os.getenv("REDIS_URL", "").strip()
     if not redis_url:
@@ -306,6 +310,8 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
                 cached_json = redis_client.get(_assessment_cache_key(*key))
                 if cached_json:
                     payload = json.loads(cached_json)
+                    if not _assessment_has_required_context(payload):
+                        return None
                     with _state["assessment_cache_lock"]:
                         _state["assessment_cache"][key] = (
                             time.monotonic() + ttl,
@@ -319,6 +325,9 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
             if cached:
                 expires_at, payload = cached
                 if expires_at >= time.monotonic():
+                    if not _assessment_has_required_context(payload):
+                        _state["assessment_cache"].pop(key, None)
+                        return None
                     return FullAssessment(**payload)
                 else:
                     _state["assessment_cache"].pop(key, None)
@@ -326,13 +335,16 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
     # Check persistence backend (saved care plans)
     saved = latest_saved_care_plan(patient_id, discharge_ts)
     if saved and "draft_plan" in saved and "patient_name" in saved:
+        risk_category = saved.get("risk_category", "medium")
+        if not _assessment_has_required_context({"risk_category": risk_category, **saved}):
+            return None
         payload = {
             "patient_id": saved["patient_id"],
             "discharge_ts": str(saved.get("discharge_ts", discharge_ts)),
             "patient_name": saved["patient_name"],
             "risk_score": float(saved.get("risk_score", 0.0)),
             "risk_percentile": float(saved.get("risk_percentile", 0.0)),
-            "risk_category": saved.get("risk_category", "medium"),
+            "risk_category": risk_category,
             "admission_reason": saved.get("admission_reason", ""),
             "patient_context_summary": saved.get("patient_context_summary", ""),
             "categories_with_no_match": saved.get("categories_with_no_match", []),
