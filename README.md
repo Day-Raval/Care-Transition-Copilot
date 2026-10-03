@@ -54,9 +54,10 @@ critique agent, risk-gated LangGraph orchestration, free-form tool-calling chat
 agent, a React clinician UI, API-key or OIDC bearer-token protection,
 episode-specific assessments cached in memory or Redis, configurable
 local-or-database persistence, Postgres migration/verification scripts, saved
-draft care-plan records, and approve/reject decisions. Full EHR write-back,
-notification delivery, managed deployments, and production monitoring are still
-planned work.
+draft care-plan records, approve/reject decisions, real-time HL7/structured
+discharge intake, Kafka producers, and a persistent Kafka consumer with DLQ and
+idempotency handling. Full EHR write-back, managed deployments, and production
+monitoring are still planned work.
 
 ```mermaid
 flowchart TB
@@ -141,6 +142,11 @@ flowchart TB
   the `/predict` request schema from that model's saved feature list, logs live
   predictions, and exposes a drift report against the training reference
   distribution.
+- **Implemented real-time intake path** - FastAPI accepts raw HL7v2 ADT^A03
+  discharge messages through `POST /intake/hl7-adt` and structured discharge
+  triggers through `POST /intake/discharge-event`, derives model features,
+  scores risk, optionally starts care-plan precomputation, and publishes the
+  normalized episode to Kafka when enabled.
 - **Implemented retrieval foundation** - discharge notes are split into
   section-aware chunks, embedded into a local persistent ChromaDB collection, and
   validated with open-corpus and patient-scoped retrieval checks.
@@ -159,15 +165,17 @@ flowchart TB
   OIDC bearer-token verification with role checks for user access, request
   timeouts, cached assessment generation with optional Redis backing,
   file-based or SQL-backed audit/care-plan persistence, request tracing,
-  idempotent care-plan decisions, and actor tracking for clinician actions.
+  idempotent care-plan decisions, actor tracking for clinician actions,
+  Kafka consumer idempotency, and dead-letter routing for malformed or failed
+  stream messages.
 - **Implemented notification handoff** - approved care plans queue a patient
   portal stub notification by default, or send an SMS through Twilio when the
   optional credentials, package, and recipient number are configured. Delivery
   results are persisted locally or in SQL and never make the decision request
   fail.
 - **Planned platform services** - managed deployment, CI/CD, production
-  monitoring, retries, circuit breakers, FHIR write-back, and notification
-  delivery remain future hardening work.
+  monitoring, circuit breakers, and FHIR write-back remain future hardening
+  work.
 
 ### Authentication configuration
 
@@ -327,6 +335,17 @@ The current repository shows the first stage of the MVP working locally:
   `POST /tasks/precompute-assessments`, or using `scripts/precompute_assessments.py`.
   Precomputed plans are persisted and cached, dropping UI load time from ~10s to <10ms,
   with in-flight request deduplication to prevent duplicate LLM calls.
+- Added real-time discharge intake in `src/ingestion/hl7_intake.py` and FastAPI
+  endpoints for raw HL7v2 ADT^A03 messages and structured discharge triggers.
+  Intake derives risk features, scores the episode, triggers precomputation for
+  medium/high-risk patients, publishes a discharge episode event, and writes an
+  audit event when Kafka is enabled.
+- Added a persistent Kafka consumer in `src/data_services/consumer.py`, with a
+  CLI runner at `scripts/run_kafka_consumer.py`. The consumer handles discharge
+  episode and audit-event topics, skips duplicate event IDs through
+  `src/data_services/idempotency.py`, pauses/resumes polling under backpressure,
+  retries handler failures, and routes malformed or exhausted messages to the
+  configured DLQ topic.
 
 
 Committed processed data currently includes:
@@ -409,10 +428,11 @@ Design principles from the proposal:
 ## Status
 
 MVP in progress. The local data, modeling, retrieval foundation, agent pipeline,
-serving layer, and first clinician-facing web workflow are now implemented: FHIR
-ingestion, hospitalization episode construction, feature export, 30-day target
-labeling, baseline Cox survival modeling, patient-grouped cross-validation for
-comparing Cox, Random Survival Forest, and Gradient Boosting survival candidates,
+serving layer, event-streaming layer, and first clinician-facing web workflow
+are now implemented: FHIR ingestion, HL7v2/structured discharge intake,
+hospitalization episode construction, feature export, 30-day target labeling,
+baseline Cox survival modeling, patient-grouped cross-validation for comparing
+Cox, Random Survival Forest, and Gradient Boosting survival candidates,
 experiment logging/model saving, fairness-audit infrastructure, section-aware
 note chunking, ChromaDB vector-store indexing, FastAPI model serving,
 patient-scoped retrieval, risk-model-to-agent integration, dynamic retrieval
@@ -420,10 +440,11 @@ categories, grounded care-plan drafting, second-model critique, risk-gated
 LangGraph orchestration, an auditable tool-calling chat agent, API-key protected
 or OIDC-authenticated serving, cached episode-specific assessment generation
 with optional Redis backing, approve/reject decision persistence with local or
-SQL-backed storage, Postgres migration and verification scripts, request
-tracing, idempotent actor-labeled decisions, approved care-transition report
-export, and a React UI with risk queue, Patients, Care plans, Ask a question
-routes, dashboard clinician decision controls, configurable clinician ID, OIDC
+SQL-backed storage, Kafka publishing and consumer processing with DLQ/idempotency
+support, Postgres migration and verification scripts, request tracing,
+idempotent actor-labeled decisions, approved care-transition report export, and
+a React UI with risk queue, Patients, Care plans, Ask a question routes,
+dashboard clinician decision controls, configurable clinician ID, OIDC
 login/logout support, and report preview/status.
 
 The current modeling work is still diagnostic rather than production-ready. The
@@ -542,13 +563,14 @@ mode creates `care_plan_decisions`, `care_plans`, `audit_events`, and
 table when it has been migrated. The React app sends clinician attribution with
 `VITE_CLINICIAN_ID`, which defaults to `demo_clinician`.
 
-Kafka publishing is disabled by default. The `confluent-kafka` dependency is
-listed in `requirements.txt`. To enable publishing, set `KAFKA_ENABLED=true`
-and configure `KAFKA_BOOTSTRAP_SERVERS`; topic defaults are
-`care-transition.discharge-episodes` and `care-transition.audit-events`, and
-can be overridden with `KAFKA_TOPIC_EPISODES` and
-`KAFKA_TOPIC_AUDIT_EVENTS`. `KAFKA_CLIENT_ID` defaults to
-`care-transition-copilot`, and `KAFKA_MESSAGE_TIMEOUT_MS` defaults to `5000`.
+Kafka integration is disabled by default. The `confluent-kafka` dependency is
+listed in `requirements.txt`. To enable publishing and consuming, set
+`KAFKA_ENABLED=true` and configure `KAFKA_BOOTSTRAP_SERVERS`; topic defaults are
+`care-transition.discharge-episodes`, `care-transition.audit-events`, and
+`care-transition.dlq`, and can be overridden with `KAFKA_TOPIC_EPISODES`,
+`KAFKA_TOPIC_AUDIT_EVENTS`, and `KAFKA_TOPIC_DLQ`. `KAFKA_CLIENT_ID` defaults
+to `care-transition-copilot`, and `KAFKA_MESSAGE_TIMEOUT_MS` defaults to
+`5000`.
 
 Running `python scripts/export_records.py` writes the structured discharge
 CSV and note JSONL files and, when Kafka is enabled, publishes one
@@ -558,8 +580,21 @@ envelope containing `schema_version`, `event_id`, `event_type`, `occurred_at`,
 `source`, and `payload`. Publish failures are logged; they do not block local
 export, persistence, or API requests. The `/health` dependency report checks
 the Kafka configuration and client package when enabled, but does not verify
-broker connectivity. This repository provides producers only; consumers and
-managed event processing remain deployment-specific.
+broker connectivity.
+
+The API can start the background Kafka consumer when
+`KAFKA_CONSUMER_ENABLED=true`. To run it as a separate process instead:
+
+```bash
+python scripts/run_kafka_consumer.py --workers 4 --max-in-flight 50
+```
+
+The consumer group defaults to `care-transition-copilot-consumers`; override it
+with `KAFKA_CONSUMER_GROUP_ID` or the runner's `--group-id` flag. It reads the
+discharge episode and audit-event topics, uses a local SQLite idempotency store
+at `results/idempotency.sqlite3` by default, retries failed handlers, and sends
+malformed or unprocessable messages to the DLQ topic. The `/health` response
+includes `kafka_consumer` stats when the background consumer is enabled.
 
 See `database/README.md` for connection-check and one-time migration scripts
 that move existing local JSONL/SQLite data and `discharge_records_with_target.csv`
@@ -597,6 +632,20 @@ Invoke-RestMethod `
   -Headers $headers `
   -Body $body
 
+$hl7 = @"
+MSH|^~\&|EPIC|GENHOSP|COPILOT|COPILOT|20260821143000||ADT^A03|MSG00001|P|2.5
+PID|1||TEST-PATIENT-99^^^MRN||Smith^Jane^^^^||19550101|F
+PV1|1|I|CARD^204^1||||1234^Doc|||CARD|||||||||TEST-ENC-1|||||||||||||||||||||||||20260818080000|20260821143000
+DG1|1||I50.9^Heart Failure^ICD10
+"@
+
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8080/intake/hl7-adt `
+  -Method Post `
+  -ContentType "application/json" `
+  -Headers $headers `
+  -Body (@{ raw_message = $hl7 } | ConvertTo-Json)
+
 Invoke-RestMethod http://127.0.0.1:8080/drift-report -Headers $headers
 
 $patientId = "<patient_id>"
@@ -627,6 +676,18 @@ curl -X POST http://127.0.0.1:8080/predict \
     "prior_admissions_90d": 1,
     "med_flag_diuretic": true,
     "med_flag_anticoagulant": false
+  }'
+
+curl -X POST http://127.0.0.1:8080/intake/discharge-event \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{
+    "patient_id": "TEST-PATIENT-99",
+    "encounter_id": "TEST-ENC-1",
+    "patient_name": "Jane Smith",
+    "admit_ts": "2026-08-18T08:00:00Z",
+    "discharge_ts": "2026-08-21T14:30:00Z",
+    "admission_reason": "Heart Failure"
   }'
 
 curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8080/drift-report
@@ -686,11 +747,13 @@ python scripts/precompute_assessments.py --category high --limit 10
 ```bash
 python -m unittest tests.test_decision_idempotency
 python -m unittest tests.test_precompute
+python -m pytest -q tests/test_kafka_consumer.py
 ```
 
 The current automated tests cover idempotent decision writes for both local
 SQLite persistence and the SQL-backed database path, as well as the background
-precomputation worker, patient-event deduplication, and saved care-plan retrieval.
+precomputation worker, patient-event deduplication, saved care-plan retrieval,
+HL7 intake parsing, Kafka consumer idempotency, and DLQ routing.
 The modeling and retrieval checks are still run through the analysis
 scripts above.
 
@@ -700,9 +763,10 @@ scripts above.
 src/
 |-- agents/       # Risk tool, retrieval, reasoning, critique, chat, and orchestration
 |-- api/          # FastAPI model serving, dynamic schema, drift, audit/care-plan persistence
+|-- data_services/ # Persistence, notifications, Kafka producers/consumer, idempotency
 |-- embeddings/   # Section-aware note chunking and Chroma vector-store build
 |-- retrieval/    # Patient-scoped Chroma queries with relevance thresholding
-|-- ingestion/    # FHIR parsing, temporal filters, episode clustering
+|-- ingestion/    # FHIR/HL7 intake, temporal filters, episode clustering
 |-- features/     # 30-day target construction
 |-- model/        # Cox baseline, experiment registry, fairness/model comparison
 `-- utils/        # Config, logging, and runtime timeout helpers
@@ -714,6 +778,7 @@ web/
 
 scripts/
 |-- export_records.py              # Structured CSV + notes JSONL export
+|-- run_kafka_consumer.py          # Persistent Kafka consumer daemon
 |-- EDA.py                         # Exploratory checks on processed records
 |-- check_resources.py             # Raw FHIR resource inventory
 |-- check_comorbidity.py           # Feature sanity checks
@@ -768,9 +833,8 @@ or data use agreement is required to run or demo it. See
 | Implemented agents | LangGraph, Groq, risk-gated orchestration, dynamic patient-scoped retrieval categories, function-calling chat tools |
 | Implemented API | FastAPI, Uvicorn, Pydantic, SQLAlchemy, API-key/OIDC auth, role checks, request tracing, in-memory or Redis assessment cache, local JSONL/SQLite or SQL-backed persistence, Markdown report export |
 | Implemented frontend | React, Vite, React Router |
-| Optional data services | Postgres, Redis, Kafka producer integration |
-| Planned data services | Kafka consumers / managed event processing |
-| Planned notifications | Twilio or patient portal stub |
+| Optional data services | Postgres, Redis, Kafka producer/consumer integration, DLQ routing, local SQLite idempotency store |
+| Optional notifications | Twilio SMS or local patient portal stub |
 
 ## Success criteria
 
