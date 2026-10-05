@@ -64,6 +64,18 @@ export function getQueue(category = null, limit = 50) {
   return request(`/patients?${params}`);
 }
 
+export function searchPatients({ search = "", category = null, limit = 50, offset = 0 } = {}) {
+  return request("/patients/search", {
+    method: "POST",
+    body: JSON.stringify({ search, category, limit, offset }),
+  });
+}
+
+export function getPatientHistory(patientRef, { limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit, offset });
+  return request(`/patients/${patientPath(patientRef)}/history?${params}`);
+}
+
 function patientPath(patientRef) {
   return encodeURIComponent(patientRef);
 }
@@ -131,5 +143,3 @@ export function triggerPrecompute({ category = "high", limit = 10, force = false
 export function getPrecomputeStatus() {
   return request("/tasks/precompute-assessments/status");
 }
-
-

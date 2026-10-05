@@ -17,7 +17,7 @@ RiskPrediction and ModelInfo stay static — their shape doesn't depend on
 which features the model uses internally.
 """
 
-from typing import Type
+from typing import Literal, Type
 
 from pydantic import BaseModel, Field, create_model
 
@@ -66,6 +66,31 @@ class QueueItem(BaseModel):
     risk_score: float
     risk_percentile: float
     risk_category: str
+
+
+class PatientSearchRequest(BaseModel):
+    search: str = Field(default="", max_length=200)
+    category: Literal["high", "medium", "low"] | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class PatientSearchResponse(BaseModel):
+    items: list[QueueItem]
+    total: int
+
+
+class PatientHistoryItem(BaseModel):
+    discharge_ts: str
+    section_name: str
+    text: str
+
+
+class PatientHistoryResponse(BaseModel):
+    items: list[PatientHistoryItem]
+    offset: int
+    limit: int
+    has_more: bool
 
 
 class FullAssessment(BaseModel):
@@ -175,4 +200,3 @@ class IntakeResultResponse(BaseModel):
     risk_category: str
     precompute_triggered: bool
     published_to_kafka: bool
-

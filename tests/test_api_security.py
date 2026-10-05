@@ -64,6 +64,7 @@ class OIDCAuthenticationTest(unittest.TestCase):
 
     def test_coordinator_can_read_patient_data_but_not_drift_metrics(self):
         self.assertIn("care_coordinator", security.required_roles("GET", "/patients"))
+        self.assertIn("care_coordinator", security.required_roles("POST", "/patients/search"))
         self.assertNotIn("care_coordinator", security.required_roles("GET", "/drift-report"))
 
     def test_decision_request_does_not_accept_client_actor(self):

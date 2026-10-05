@@ -90,6 +90,10 @@ from src.api.schemas import (
     HL7IntakeRequest,
     IntakeResultResponse,
     ModelInfo,
+    PatientHistoryItem,
+    PatientHistoryResponse,
+    PatientSearchRequest,
+    PatientSearchResponse,
     PrecomputeRequest,
     PrecomputeStatus,
     QueueItem,
@@ -661,6 +665,22 @@ def patient_queue(limit: int = 50, category: str | None = None):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    items = _build_patient_queue_items(category=category)
+    return items[:limit]
+
+
+@app.post("/patients/search", response_model=PatientSearchResponse)
+def search_patient_queue(query: PatientSearchRequest):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    items = _build_patient_queue_items(category=query.category, search=query.search)
+    total = len(items)
+    page = items[query.offset:query.offset + query.limit]
+    return PatientSearchResponse(items=page, total=total)
+
+
+def _build_patient_queue_items(category: str | None = None, search: str = "") -> list[QueueItem]:
     queue_df = _state["queue_df"]
     scores = _state["reference_scores"]
 
@@ -682,7 +702,55 @@ def patient_queue(limit: int = 50, category: str | None = None):
     if category:
         items = [i for i in items if i.risk_category == category]
     items.sort(key=lambda i: i.discharge_ts, reverse=True)
-    return items[:limit]
+
+    normalized_search = search.strip().casefold()
+    if normalized_search:
+        items = [
+            item
+            for item in items
+            if normalized_search in " ".join(
+                (item.patient_name, item.admission_reason, item.risk_category, item.discharge_ts)
+            ).casefold()
+        ]
+    return items
+
+
+@app.get("/patients/{patient_ref}/history", response_model=PatientHistoryResponse)
+def patient_history(patient_ref: str, limit: int = 50, offset: int = 0):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
+    if offset < 0:
+        raise HTTPException(status_code=422, detail="offset must be non-negative")
+
+    patient_id = _resolve_patient_key(patient_ref)
+    from src.retrieval.query_store import get_collection
+
+    collection = get_collection()
+    page_records = collection.get(
+        where={"patient_id": patient_id},
+        include=["documents", "metadatas"],
+        limit=limit + 1,
+        offset=offset,
+    )
+    has_more = len(page_records["ids"]) > limit
+    history_items = [
+        PatientHistoryItem(
+            discharge_ts=str(metadata.get("discharge_ts", "")),
+            section_name=str(metadata.get("section_name", "Chart note")),
+            text=document,
+        )
+        for document, metadata in zip(
+            page_records["documents"][:limit], page_records["metadatas"][:limit]
+        )
+    ]
+    return PatientHistoryResponse(
+        items=history_items,
+        offset=offset,
+        limit=limit,
+        has_more=has_more,
+    )
 
 
 @app.get("/patients/{patient_ref}/assessment", response_model=FullAssessment, response_model_exclude={"patient_id"})
@@ -929,5 +997,3 @@ def shutdown_background_workers():
     if consumer:
         logger.info("Stopping Kafka consumer on application shutdown...")
         consumer.stop()
-
-
