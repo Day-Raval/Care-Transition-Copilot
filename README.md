@@ -538,17 +538,52 @@ python -m src.agents.chat_agent "For patient <patient_id>, should we be worried 
 
 To run the React web app:
 
+Terminal 1, from WSL:
+
+```bash
+source ~/.bashrc
+care-api
+```
+
+`care-api` is a local WSL helper in `~/.bashrc`. It changes into this project,
+unsets demo API-key variables, stops any existing uvicorn process for this app,
+then runs `./.venv/bin/python -m uvicorn src.api.main:app --reload` on the WSL
+IP at port `8080`. If the helper is missing, add this block to `~/.bashrc`:
+
+```bash
+care-api() {
+  local WSL_IP
+  WSL_IP=$(hostname -I | awk '{print $1}')
+  unset API_KEY VITE_API_KEY
+  cd "/mnt/c/Users/dayes/Downloads/Care_Transition_Copilot" || return
+  pkill -f "[u]vicorn src.api.main:app" 2>/dev/null || true
+  ./.venv/bin/python -m uvicorn src.api.main:app --reload --host "$WSL_IP" --port 8080
+}
+```
+
+Terminal 2, from WSL:
+
 ```bash
 cd web
 npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-Then open `http://127.0.0.1:5173/`. The web app expects the FastAPI service on
-`http://localhost:8080` by default. Set matching `API_KEY` and `VITE_API_KEY`
-values so browser requests can pass the required `X-API-Key` header. Optional
-runtime variables include `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`,
-`CACHE_TTL_SECONDS`, `REDIS_URL`, and `VITE_REQUEST_TIMEOUT_MS`. When
+Then open `http://127.0.0.1:5173/`. The browser calls same-origin `/api`, and
+Vite proxies that to FastAPI, so browser requests do not depend on
+`localhost:8080` or a hard-coded WSL IP. Binding uvicorn to `$WSL_IP` is needed
+on this machine because WSL is using Windows `npm`/Node for Vite.
+
+The frontend privacy boundary uses `patient_ref` instead of exposing raw
+`patient_id` values. Queue, assessment, decision, report, chat, audit,
+notification, and saved-care-plan responses are redacted before display; the UI
+shows short masked references like `Ref ...1234`. Report filenames also use a
+hash instead of the first characters of the patient ID.
+
+Set matching `API_KEY` and `VITE_API_KEY` values so browser requests can pass
+the required `X-API-Key` header. Optional runtime variables include
+`LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`, `CACHE_TTL_SECONDS`,
+`REDIS_URL`, and `VITE_REQUEST_TIMEOUT_MS`. When
 `REDIS_URL` is set, assessment cache entries are stored in Redis with the same
 `CACHE_TTL_SECONDS`; if Redis is unavailable, the API falls back to its
 in-process cache. Assessment requests can use a longer frontend timeout through
@@ -648,11 +683,11 @@ Invoke-RestMethod `
 
 Invoke-RestMethod http://127.0.0.1:8080/drift-report -Headers $headers
 
-$patientId = "<patient_id>"
+$patientRef = "<patient_ref from GET /patients>"
 $dischargeTs = "<discharge_ts>"
 
 Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8080/patients/$patientId/decision?discharge_ts=$dischargeTs" `
+  -Uri "http://127.0.0.1:8080/patients/$patientRef/decision?discharge_ts=$dischargeTs" `
   -Method Post `
   -ContentType "application/json" `
   -Headers $headers `
@@ -697,20 +732,22 @@ curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8080/care-plans
 curl -X POST \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
-  "http://127.0.0.1:8080/patients/<patient_id>/decision?discharge_ts=<discharge_ts>" \
+  "http://127.0.0.1:8080/patients/<patient_ref>/decision?discharge_ts=<discharge_ts>" \
   -d '{"decision":"approved"}'
 
 curl -H "X-API-Key: $API_KEY" \
-  "http://127.0.0.1:8080/patients/<patient_id>/report?discharge_ts=<discharge_ts>"
+  "http://127.0.0.1:8080/patients/<patient_ref>/report?discharge_ts=<discharge_ts>"
 ```
 
 `/predict` returns a relative Cox risk score, percentile, and low/medium/high
 risk category. `/drift-report` needs at least 30 logged predictions before it
-can make a meaningful drift assessment. `/patients/{patient_id}/decision`
-records `approved` or `rejected` for the selected patient episode. Repeated
-decision writes update the same episode record instead of creating duplicates.
-`/patients/{patient_id}/report` returns a Markdown report only for approved
-decisions; rejected decisions return an edit-required status.
+can make a meaningful drift assessment. `GET /patients` returns `patient_ref`
+values for browser/API navigation instead of raw patient IDs.
+`/patients/{patient_ref}/decision` records `approved` or `rejected` for the
+selected patient episode. Repeated decision writes update the same episode
+record instead of creating duplicates. `/patients/{patient_ref}/report` returns
+a Markdown report only for approved decisions; rejected decisions return an
+edit-required status.
 
 ### Useful analysis scripts
 
@@ -746,6 +783,7 @@ python scripts/precompute_assessments.py --category high --limit 10
 
 ```bash
 python -m unittest tests.test_decision_idempotency
+python -m unittest tests.test_patient_privacy
 python -m unittest tests.test_precompute
 python -m pytest -q tests/test_kafka_consumer.py
 ```
