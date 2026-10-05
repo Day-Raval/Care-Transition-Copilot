@@ -44,7 +44,7 @@ class TransitionReportTest(unittest.TestCase):
                     "# Report",
                 )
 
-                self.assertEqual(path.name, "care-transition-report__2026-08-09__994d6249.md")
+                self.assertEqual(path.name, "care-transition-report__2026-08-09__9c03687a.md")
                 self.assertEqual(path.read_text(encoding="utf-8"), "# Report")
             finally:
                 production.REPORTS_DIR = original_reports_dir

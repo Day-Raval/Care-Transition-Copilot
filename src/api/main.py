@@ -300,6 +300,70 @@ def _latest_discharge_ts(patient_id: str, discharge_ts: str | None = None) -> st
     return str(patient_rows.sort_values("discharge_ts").iloc[-1]["discharge_ts"])
 
 
+def _patient_ref(patient_id: str) -> str:
+    salt = os.getenv("PATIENT_REF_SALT") or os.getenv("API_KEY") or _state.get("run_id", "")
+    return hashlib.sha256(f"{salt}\0{patient_id}".encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_patient_key(patient_key: str) -> str:
+    if "queue_df" not in _state:
+        return patient_key
+    queue_df = _state["queue_df"]
+    patient_ids = [str(pid) for pid in queue_df["patient_id"].drop_duplicates()]
+    if patient_key in patient_ids:
+        return patient_key
+    for patient_id in patient_ids:
+        if _patient_ref(patient_id) == patient_key:
+            return patient_id
+    raise HTTPException(status_code=404, detail="No episode found for patient reference")
+
+
+def _redact_patient_record(record: dict[str, Any]) -> dict[str, Any]:
+    public = json.loads(json.dumps(record, ensure_ascii=True, default=str))
+
+    def redact(value):
+        if isinstance(value, dict):
+            next_value = {}
+            for key, item in value.items():
+                if key == "patient_id":
+                    next_value["patient_ref"] = _patient_ref(str(item))
+                else:
+                    next_value[key] = redact(item)
+            return next_value
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        if isinstance(value, str) and "queue_df" in _state:
+            for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
+                value = value.replace(patient_id, _patient_ref(patient_id))
+        return value
+
+    return redact(public)
+
+
+def _replace_patient_refs_with_ids(text: str) -> str:
+    if not _state or "queue_df" not in _state:
+        return text
+    for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
+        text = text.replace(_patient_ref(patient_id), patient_id)
+    return text
+
+
+def _redact_chat_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    redacted = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    if not _state or "queue_df" not in _state:
+        return redacted
+    for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
+        ref = _patient_ref(patient_id)
+        redacted["answer"] = redacted["answer"].replace(patient_id, ref)
+        for call in redacted["tool_calls"]:
+            if call.get("arguments", {}).get("patient_id") == patient_id:
+                call["arguments"].pop("patient_id", None)
+                call["arguments"]["patient_ref"] = ref
+            call["result"] = call["result"].replace(f"patient_id: {patient_id}", f"patient_ref: {ref}")
+            call["result"] = call["result"].replace(patient_id, ref)
+    return redacted
+
+
 def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment | None:
     ttl = _cache_ttl_seconds()
     key = (patient_id, discharge_ts)
@@ -310,6 +374,7 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
                 cached_json = redis_client.get(_assessment_cache_key(*key))
                 if cached_json:
                     payload = json.loads(cached_json)
+                    payload.setdefault("patient_ref", _patient_ref(patient_id))
                     if not _assessment_has_required_context(payload):
                         return None
                     with _state["assessment_cache_lock"]:
@@ -325,6 +390,7 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
             if cached:
                 expires_at, payload = cached
                 if expires_at >= time.monotonic():
+                    payload.setdefault("patient_ref", _patient_ref(patient_id))
                     if not _assessment_has_required_context(payload):
                         _state["assessment_cache"].pop(key, None)
                         return None
@@ -340,6 +406,7 @@ def _assessment_cache_get(patient_id: str, discharge_ts: str) -> FullAssessment 
             return None
         payload = {
             "patient_id": saved["patient_id"],
+            "patient_ref": _patient_ref(str(saved["patient_id"])),
             "discharge_ts": str(saved.get("discharge_ts", discharge_ts)),
             "patient_name": saved["patient_name"],
             "risk_score": float(saved.get("risk_score", 0.0)),
@@ -396,6 +463,7 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
     is_low_risk = result["risk_category"] == LOW_RISK_CATEGORY
     assessment = FullAssessment(
         patient_id=patient_id,
+        patient_ref=_patient_ref(patient_id),
         discharge_ts=discharge_ts,
         patient_name=result["patient_name"],
         risk_score=result["risk_score"],
@@ -602,7 +670,7 @@ def patient_queue(limit: int = 50, category: str | None = None):
         percentile = float((scores < risk_score).mean() * 100)
         cat = _categorize(percentile)
         items.append(QueueItem(
-            patient_id=queue_df.iloc[i]["patient_id"],
+            patient_ref=_patient_ref(str(queue_df.iloc[i]["patient_id"])),
             patient_name=queue_df.iloc[i]["patient_name"],
             discharge_ts=str(queue_df.iloc[i]["discharge_ts"]),
             admission_reason=str(queue_df.iloc[i]["admission_reason"]),
@@ -617,8 +685,8 @@ def patient_queue(limit: int = 50, category: str | None = None):
     return items[:limit]
 
 
-@app.get("/patients/{patient_id}/assessment", response_model=FullAssessment)
-def patient_assessment(patient_id: str, discharge_ts: str | None = None):
+@app.get("/patients/{patient_ref}/assessment", response_model=FullAssessment, response_model_exclude={"patient_id"})
+def patient_assessment(patient_ref: str, discharge_ts: str | None = None):
     """
     Runs the full orchestrator graph (risk -> retrieval -> reasoning ->
     critique) for one patient. If precomputed/cached, returns instantly.
@@ -628,6 +696,7 @@ def patient_assessment(patient_id: str, discharge_ts: str | None = None):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    patient_id = _resolve_patient_key(patient_ref)
     episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
     cached = _assessment_cache_get(patient_id, episode_discharge_ts)
     if cached is not None:
@@ -648,23 +717,26 @@ def patient_assessment(patient_id: str, discharge_ts: str | None = None):
 
 
 
-@app.get("/patients/{patient_id}/decision", response_model=DecisionRecord | None)
-def patient_decision(patient_id: str, discharge_ts: str | None = None):
+@app.get("/patients/{patient_ref}/decision", response_model=DecisionRecord | None, response_model_exclude={"patient_id"})
+def patient_decision(patient_ref: str, discharge_ts: str | None = None):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
     episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts) if discharge_ts else None
-    return latest_decision(patient_id, episode_discharge_ts)
+    record = latest_decision(patient_id, episode_discharge_ts)
+    return {**record, "patient_ref": _patient_ref(patient_id)} if record else None
 
 
-@app.post("/patients/{patient_id}/decision", response_model=DecisionRecord)
+@app.post("/patients/{patient_ref}/decision", response_model=DecisionRecord, response_model_exclude={"patient_id"})
 def decide_patient_plan(
-    patient_id: str,
+    patient_ref: str,
     decision_request: DecisionRequest,
     http_request: Request,
     discharge_ts: str | None = None,
 ):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
     episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
     assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
     if assessment is None:
@@ -698,13 +770,14 @@ def decide_patient_plan(
             channel=notification["channel"],
             status=notification["status"],
         )
-    return DecisionRecord(**record)
+    return DecisionRecord(**record, patient_ref=_patient_ref(patient_id))
 
 
-@app.get("/patients/{patient_id}/report", response_model=TransitionReport)
-def patient_report(patient_id: str, discharge_ts: str | None = None):
+@app.get("/patients/{patient_ref}/report", response_model=TransitionReport)
+def patient_report(patient_ref: str, discharge_ts: str | None = None):
     if not _state:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
     episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
     decision = latest_decision(patient_id, episode_discharge_ts)
     if decision is None:
@@ -740,12 +813,12 @@ def patient_report(patient_id: str, discharge_ts: str | None = None):
 
 @app.get("/care-plans")
 def saved_care_plans(limit: int = 50):
-    return read_care_plans(limit=limit)
+    return [_redact_patient_record(record) for record in read_care_plans(limit=limit)]
 
 
 @app.get("/notifications")
 def saved_notifications(limit: int = 50):
-    return read_notifications(limit=limit)
+    return [_redact_patient_record(record) for record in read_notifications(limit=limit)]
 
 
 @app.get("/audit-events")
@@ -754,7 +827,7 @@ def saved_audit_events(
     patient_id: str | None = None,
     request_id: str | None = None,
 ):
-    return read_audit_events(limit=limit, patient_id=patient_id, request_id=request_id)
+    return [_redact_patient_record(record) for record in read_audit_events(limit=limit, patient_id=patient_id, request_id=request_id)]
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -763,7 +836,7 @@ def chat(request: ChatRequest):
     from src.agents.chat_agent import ask
 
     try:
-        result = ask(request.question)
+        result = ask(_replace_patient_refs_with_ids(request.question))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -774,13 +847,7 @@ def chat(request: ChatRequest):
         answer=result["answer"],
     )
 
-    return ChatResponse(
-        answer=result["answer"],
-        tool_calls=[
-            {"name": tc["name"], "arguments": tc["arguments"], "result": tc["result"]}
-            for tc in result["tool_calls"]
-        ],
-    )
+    return ChatResponse.model_validate(_redact_chat_payload(result))
 
 
 @app.post("/tasks/precompute-assessments", status_code=202)

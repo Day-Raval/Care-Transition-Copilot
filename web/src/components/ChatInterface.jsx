@@ -4,11 +4,11 @@ import { renderMarkdown } from "../markdown.js";
 
 function findPatient(toolCalls = []) {
   for (const call of toolCalls) {
-    const found = call.result?.match(/Found:\s+(.+?)\s+\(patient_id:\s*([^)]+)\)/);
+    const found = call.result?.match(/Found:\s+(.+?)\s+\(patient_ref:\s*([^)]+)\)/);
     if (found) return { name: found[1], id: found[2] };
   }
-  const callWithPatientId = toolCalls.find((call) => call.arguments?.patient_id);
-  return callWithPatientId ? { id: callWithPatientId.arguments.patient_id } : null;
+  const callWithPatientRef = toolCalls.find((call) => call.arguments?.patient_ref);
+  return callWithPatientRef ? { id: callWithPatientRef.arguments.patient_ref } : null;
 }
 
 function normalizePatientText(value) {
@@ -25,7 +25,7 @@ function findCandidate(question, candidates) {
 
 function findCandidates(toolCalls = []) {
   const candidates = [];
-  const pattern = /-\s+(.+?)\s+\(patient_id:\s*([^)]+)\)/g;
+  const pattern = /-\s+(.+?)\s+\(patient_ref:\s*([^)]+)\)/g;
   for (const call of toolCalls) {
     for (const match of call.result?.matchAll(pattern) || []) {
       candidates.push({ name: match[1], id: match[2] });
@@ -56,7 +56,7 @@ export default function ChatInterface() {
     const hasPatientContext =
       !activePatient ||
       question.includes(activePatient.id) ||
-      /\b(patient|patient_id)\b/i.test(question);
+      /\b(patient|patient_ref)\b/i.test(question);
     const apiQuestion = candidate
       ? `For patient ${candidate.id}, ${pendingQuestion || question}`
       : hasPatientContext
@@ -103,12 +103,12 @@ export default function ChatInterface() {
       <div className="chat-header">
         <div>
           <h2>Patient chat</h2>
-          <p className="panel-subtitle">Ask by name or patient ID.</p>
+          <p className="panel-subtitle">Ask by patient name.</p>
         </div>
         {patient && (
           <button className="patient-context" onClick={() => setPatient(null)} type="button">
             {patient.name || "Current patient"}
-            <span>{patient.id}</span>
+            <span>Ref ...{patient.id.slice(-4)}</span>
           </button>
         )}
       </div>
@@ -137,11 +137,7 @@ export default function ChatInterface() {
                   </summary>
                   {m.toolCalls.map((tc, j) => (
                     <div key={j} className="tool-call">
-                      <span className="tool-name">{tc.name}</span>({JSON.stringify(tc.arguments)})
-                      <div>
-                        - {tc.result.slice(0, 150)}
-                        {tc.result.length > 150 ? "..." : ""}
-                      </div>
+                      <span className="tool-name">{tc.name}</span>
                     </div>
                   ))}
                 </details>

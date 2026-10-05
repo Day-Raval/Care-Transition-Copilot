@@ -8,6 +8,7 @@ tables when PERSISTENCE_BACKEND=database and DATABASE_URL are set.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sqlite3
@@ -411,7 +412,7 @@ def build_transition_report(assessment: Any, decision: dict[str, Any], disclaime
 def public_report_path(patient_id: str, discharge_ts: str) -> Path:
     date_match = re.search(r"\d{4}-\d{2}-\d{2}", discharge_ts)
     discharge_date = date_match.group(0) if date_match else "unknown-date"
-    patient_slug = re.sub(r"[^a-zA-Z0-9]+", "-", patient_id).strip("-")[:8] or "patient"
+    patient_slug = hashlib.sha256(patient_id.encode("utf-8")).hexdigest()[:8]
     return REPORTS_DIR / f"care-transition-report__{discharge_date}__{patient_slug}.md"
 
 

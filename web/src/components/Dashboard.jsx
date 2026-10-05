@@ -426,8 +426,8 @@ export default function Dashboard() {
     setEditedDraftPlan("");
     setLoadingAssessment(true);
     Promise.all([
-      getAssessment(item.patient_id, item.discharge_ts),
-      getDecision(item.patient_id, item.discharge_ts),
+      getAssessment(item.patient_ref, item.discharge_ts),
+      getDecision(item.patient_ref, item.discharge_ts),
     ])
       .then(([assessmentResult, decisionResult]) => {
         setAssessment(assessmentResult);
@@ -442,7 +442,7 @@ export default function Dashboard() {
   function loadReport(item) {
     setLoadingReport(true);
     setReport(null);
-    getReport(item.patient_id, item.discharge_ts)
+    getReport(item.patient_ref, item.discharge_ts)
       .then(setReport)
       .catch((e) => setError(e.message))
       .finally(() => setLoadingReport(false));
@@ -453,7 +453,7 @@ export default function Dashboard() {
     setSavingDecision(true);
     setReport(null);
     setError(null);
-    saveDecision(selected.patient_id, selected.discharge_ts, nextDecision, draftPlan)
+    saveDecision(selected.patient_ref, selected.discharge_ts, nextDecision, draftPlan)
       .then((savedDecision) => {
         setDecision(savedDecision);
         setIsEditingPlan(false);
@@ -492,8 +492,8 @@ export default function Dashboard() {
           <div className="queue-list">
             {queue.map((item) => (
               <div
-                key={`${item.patient_id}-${item.discharge_ts}`}
-                className={`queue-card ${selected?.patient_id === item.patient_id && selected?.discharge_ts === item.discharge_ts ? "selected" : ""}`}
+                key={`${item.patient_ref}-${item.discharge_ts}`}
+                className={`queue-card ${selected?.patient_ref === item.patient_ref && selected?.discharge_ts === item.discharge_ts ? "selected" : ""}`}
                 onClick={() => selectPatient(item)}
               >
                 <div className="queue-card-main">

@@ -1,6 +1,6 @@
 import { AUTH_MODE, getOidcAccessToken } from "./oidc.js";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE = import.meta.env.DEV ? "/api" : (import.meta.env.VITE_API_BASE_URL || "/api");
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const CHAT_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS || 120000);
@@ -49,6 +49,9 @@ async function request(path, options = {}) {
     if (e.name === "AbortError") {
       throw errorWithRequestId("Request timed out. The API may still be generating a response.", requestId);
     }
+    if (e instanceof TypeError && e.message === "Failed to fetch") {
+      throw errorWithRequestId(`Could not reach the API through ${API_BASE}. Start FastAPI with uvicorn and Vite with npm run dev.`, requestId);
+    }
     throw e;
   } finally {
     window.clearTimeout(timeout);
@@ -61,28 +64,32 @@ export function getQueue(category = null, limit = 50) {
   return request(`/patients?${params}`);
 }
 
-export function getAssessment(patientId, dischargeTs = null) {
-  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
-  return request(`/patients/${patientId}/assessment${params}`, { timeoutMs: ASSESSMENT_TIMEOUT_MS });
+function patientPath(patientRef) {
+  return encodeURIComponent(patientRef);
 }
 
-export function getDecision(patientId, dischargeTs = null) {
+export function getAssessment(patientRef, dischargeTs = null) {
   const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
-  return request(`/patients/${patientId}/decision${params}`);
+  return request(`/patients/${patientPath(patientRef)}/assessment${params}`, { timeoutMs: ASSESSMENT_TIMEOUT_MS });
 }
 
-export function saveDecision(patientId, dischargeTs, decision, draftPlan = null) {
+export function getDecision(patientRef, dischargeTs = null) {
+  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  return request(`/patients/${patientPath(patientRef)}/decision${params}`);
+}
+
+export function saveDecision(patientRef, dischargeTs, decision, draftPlan = null) {
   const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
   const body = draftPlan ? { decision, draft_plan: draftPlan } : { decision };
-  return request(`/patients/${patientId}/decision${params}`, {
+  return request(`/patients/${patientPath(patientRef)}/decision${params}`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export function getReport(patientId, dischargeTs = null) {
+export function getReport(patientRef, dischargeTs = null) {
   const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
-  return request(`/patients/${patientId}/report${params}`);
+  return request(`/patients/${patientPath(patientRef)}/report${params}`);
 }
 
 export function getSavedCarePlans(limit = 50) {
@@ -93,9 +100,8 @@ export function getNotifications(limit = 50) {
   return request(`/notifications?${new URLSearchParams({ limit })}`);
 }
 
-export function getAuditEvents({ limit = 100, patientId = "", requestId = "" } = {}) {
+export function getAuditEvents({ limit = 100, requestId = "" } = {}) {
   const params = new URLSearchParams({ limit });
-  if (patientId) params.set("patient_id", patientId);
   if (requestId) params.set("request_id", requestId);
   return request(`/audit-events?${params}`);
 }

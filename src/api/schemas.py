@@ -59,7 +59,7 @@ class ModelInfo(BaseModel):
     disclaimer: str
 
 class QueueItem(BaseModel):
-    patient_id: str
+    patient_ref: str
     patient_name: str
     discharge_ts: str
     admission_reason: str
@@ -70,6 +70,7 @@ class QueueItem(BaseModel):
 
 class FullAssessment(BaseModel):
     patient_id: str
+    patient_ref: str | None = None
     discharge_ts: str
     patient_name: str
     risk_score: float
@@ -105,6 +106,7 @@ class DecisionRequest(BaseModel):
 
 class DecisionRecord(BaseModel):
     patient_id: str
+    patient_ref: str | None = None
     discharge_ts: str
     decision: str
     decided_at: str

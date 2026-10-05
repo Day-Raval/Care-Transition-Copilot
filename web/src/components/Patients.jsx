@@ -36,10 +36,10 @@ export default function Patients() {
             <div>Risk</div>
           </div>
           {patients.map((patient) => (
-            <div className="patient-row" key={`${patient.patient_id}-${patient.discharge_ts}`}>
+            <div className="patient-row" key={`${patient.patient_ref}-${patient.discharge_ts}`}>
               <div>
                 <div className="queue-card-name">{displayPatientName(patient.patient_name)}</div>
-                <div className="patient-id">{patient.patient_id.slice(0, 8)}</div>
+                <div className="patient-id">Ref ...{patient.patient_ref.slice(-4)}</div>
               </div>
               <div>{patient.admission_reason}</div>
               <div>{new Date(patient.discharge_ts).toLocaleDateString()}</div>

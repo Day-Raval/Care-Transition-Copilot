@@ -7,11 +7,11 @@ function prettyDate(value) {
 }
 
 function shortId(value) {
-  return value ? value.slice(0, 12) : "";
+  return value ? `...${value.slice(-4)}` : "";
 }
 
 function EventDetails({ event }) {
-  const hidden = new Set(["timestamp", "event_type", "patient_id", "discharge_ts", "request_id"]);
+  const hidden = new Set(["timestamp", "event_type", "patient_id", "patient_ref", "discharge_ts", "request_id"]);
   const details = Object.fromEntries(Object.entries(event).filter(([key]) => !hidden.has(key)));
   if (Object.keys(details).length === 0) return null;
   return <pre className="event-details">{JSON.stringify(details, null, 2)}</pre>;
@@ -20,7 +20,6 @@ function EventDetails({ event }) {
 export default function Operations() {
   const [events, setEvents] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [patientId, setPatientId] = useState("");
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -29,7 +28,7 @@ export default function Operations() {
     setLoading(true);
     setError(null);
     Promise.all([
-      getAuditEvents({ limit: 100, patientId: filters.patientId ?? patientId, requestId: filters.requestId ?? requestId }),
+      getAuditEvents({ limit: 100, requestId: filters.requestId ?? requestId }),
       getNotifications(50),
     ])
       .then(([auditResult, notificationResult]) => {
@@ -41,7 +40,7 @@ export default function Operations() {
   }
 
   useEffect(() => {
-    loadEvents({ patientId: "", requestId: "" });
+    loadEvents({ requestId: "" });
   }, []);
 
   return (
@@ -52,11 +51,6 @@ export default function Operations() {
 
         <div className="filter-row">
           <input
-            placeholder="Patient ID"
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-          />
-          <input
             placeholder="Request ID"
             value={requestId}
             onChange={(e) => setRequestId(e.target.value)}
@@ -65,9 +59,8 @@ export default function Operations() {
           <button
             className="btn"
             onClick={() => {
-              setPatientId("");
               setRequestId("");
-              loadEvents({ patientId: "", requestId: "" });
+              loadEvents({ requestId: "" });
             }}
           >
             Clear
@@ -86,7 +79,7 @@ export default function Operations() {
                   <div className="event-title">{event.event_type}</div>
                   <div className="event-meta">
                     {prettyDate(event.timestamp)}
-                    {event.patient_id && ` | patient ${shortId(event.patient_id)}`}
+                    {event.patient_ref && ` | patient ${shortId(event.patient_ref)}`}
                     {event.request_id && ` | request ${shortId(event.request_id)}`}
                   </div>
                 </div>
@@ -111,7 +104,7 @@ export default function Operations() {
                 </div>
                 <div className="event-meta">
                   {prettyDate(notification.timestamp)}
-                  {notification.patient_id && ` | patient ${shortId(notification.patient_id)}`}
+                  {notification.patient_ref && ` | patient ${shortId(notification.patient_ref)}`}
                 </div>
                 {notification.message && <p className="muted">{notification.message}</p>}
               </div>

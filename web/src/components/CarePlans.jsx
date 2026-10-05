@@ -68,7 +68,7 @@ export default function CarePlans() {
     setAssessment(null);
     setError(null);
     setLoadingPlan(true);
-    getAssessment(patient.patient_id)
+    getAssessment(patient.patient_ref)
       .then(setAssessment)
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPlan(false));
@@ -108,8 +108,8 @@ export default function CarePlans() {
         <div className="queue-list">
           {patients.map((patient) => (
             <div
-              key={`${patient.patient_id}-${patient.discharge_ts}`}
-              className={`queue-card ${selected?.patient_id === patient.patient_id ? "selected" : ""}`}
+              key={`${patient.patient_ref}-${patient.discharge_ts}`}
+              className={`queue-card ${selected?.patient_ref === patient.patient_ref ? "selected" : ""}`}
               onClick={() => selectPatient(patient)}
             >
               <div className="queue-card-main">
