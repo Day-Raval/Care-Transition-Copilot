@@ -538,47 +538,40 @@ python -m src.agents.chat_agent "For patient <patient_id>, should we be worried 
 
 To run the React web app:
 
-Terminal 1, from WSL:
+From WSL:
 
 ```bash
-source ~/.bashrc
-care-api
+cd /mnt/c/Users/dayes/Downloads/Care_Transition_Copilot
+bash dev.sh
 ```
 
-`care-api` is a local WSL helper in `~/.bashrc`. It changes into this project,
-unsets demo API-key variables, stops any existing uvicorn process for this app,
-then runs `./.venv/bin/python -m uvicorn src.api.main:app --reload` on the WSL
-IP at port `8080`. If the helper is missing, add this block to `~/.bashrc`:
+This activates `.venv`, finds the current WSL IP, restarts FastAPI on port
+`8080` with access logs disabled, waits for `/health`, sets `API_PROXY_TARGET`,
+streams `logs/api.log`, and then starts Vite.
+
+If you only need to restart the API:
 
 ```bash
-care-api() {
-  local WSL_IP
-  WSL_IP=$(hostname -I | awk '{print $1}')
-  unset API_KEY VITE_API_KEY
-  cd "/mnt/c/Users/dayes/Downloads/Care_Transition_Copilot" || return
-  pkill -f "[u]vicorn src.api.main:app" 2>/dev/null || true
-  ./.venv/bin/python -m uvicorn src.api.main:app --reload --host "$WSL_IP" --port 8080
-}
+cd /mnt/c/Users/dayes/Downloads/Care_Transition_Copilot
+bash dev.sh --api-only
 ```
 
-Terminal 2, from WSL:
-
-```bash
-cd web
-npm install
-npm run dev -- --host 127.0.0.1
-```
+From PowerShell, use `cd web; npm run dev:full:win`.
 
 Then open `http://127.0.0.1:5173/`. The browser calls same-origin `/api`, and
 Vite proxies that to FastAPI, so browser requests do not depend on
-`localhost:8080` or a hard-coded WSL IP. Binding uvicorn to `$WSL_IP` is needed
-on this machine because WSL is using Windows `npm`/Node for Vite.
+`localhost:8080` or a hard-coded WSL IP.
 
 The frontend privacy boundary uses `patient_ref` instead of exposing raw
 `patient_id` values. Queue, assessment, decision, report, chat, audit,
 notification, and saved-care-plan responses are redacted before display; the UI
 shows short masked references like `Ref ...1234`. Report filenames also use a
 hash instead of the first characters of the patient ID.
+
+Routine API access logs are disabled by default because URLs can contain
+episode-scoped `patient_ref` and `discharge_ts` values. Set
+`API_ACCESS_LOGS=true` only for local debugging. Set `API_LOG_TAIL=0` to hide
+the FastAPI log stream or `API_LOG_TAIL_LINES=200` to show more startup history.
 
 Set matching `API_KEY` and `VITE_API_KEY` values so browser requests can pass
 the required `X-API-Key` header. Optional runtime variables include

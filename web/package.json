@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "bash ../scripts/start_dev.sh",
+    "dev:full:win": "powershell -ExecutionPolicy Bypass -File ../scripts/start_dev.ps1",
+    "api": "bash ../scripts/start_dev.sh --api-only",
     "build": "vite build",
     "preview": "vite preview"
   },
