@@ -1,6 +1,6 @@
 """
 Metadata for every feature that has EVER appeared in a logged experiment
-run (see results/experiments.csv), not just the currently-deployed model's
+run (see results/modeling/experiments.csv), not just the currently-deployed model's
 features. This is what lets the API schema adapt automatically: when
 main.py loads a model, it looks up each of that model's actual features
 here and builds a validated request schema on the fly — so re-pointing
@@ -18,11 +18,11 @@ FEATURE_SPECS = {
     "length_of_stay_days": (int, 0, None, "Length of the hospital stay in calendar days"),
     "medication_count": (int, 0, None, "Distinct active medications at discharge (180-day lookback)"),
     "prior_admissions_90d": (int, 0, None, "Prior inpatient episodes in the 90 days before this admission"),
-    "comorbidity_count": (int, 0, None, "Number of flagged chronic comorbidity categories (tested, currently excluded from production — see results/RESULTS.md)"),
+    "comorbidity_count": (int, 0, None, "Number of flagged chronic comorbidity categories (tested, currently excluded from production — see results/modeling/RESULTS.md)"),
     "med_flag_diuretic": (bool, None, None, "On a diuretic medication (furosemide, HCTZ, spironolactone)"),
     "med_flag_anticoagulant": (bool, None, None, "On an anticoagulant (warfarin, apixaban, etc.)"),
-    "med_flag_insulin": (bool, None, None, "On insulin (tested, currently excluded — see results/RESULTS.md)"),
-    "med_flag_opioid": (bool, None, None, "On an opioid medication (tested, currently excluded — see results/RESULTS.md)"),
+    "med_flag_insulin": (bool, None, None, "On insulin (tested, currently excluded — see results/modeling/RESULTS.md)"),
+    "med_flag_opioid": (bool, None, None, "On an opioid medication (tested, currently excluded — see results/modeling/RESULTS.md)"),
 }
 
 

@@ -4,7 +4,7 @@ MLflow (overkill for a project this size), just a plain CSV that answers
 "what have I already tried, and which run actually performed best" without
 having to re-read old terminal output or retrain to compare.
 
-Each row in results/experiments.csv is one training run: what features/
+Each row in results/modeling/experiments.csv is one training run: what features/
 hyperparameters were used, how big the split was, and how it performed.
 Each run's actual model file is saved alongside it in models/, named by
 the same run_id, so you can always load back the exact model behind any
@@ -18,7 +18,7 @@ from datetime import datetime
 import joblib
 import pandas as pd
 
-EXPERIMENTS_CSV = "results/experiments.csv"
+EXPERIMENTS_CSV = "results/modeling/experiments.csv"
 MODELS_DIR = "models"
 
 REGISTRY_COLUMNS = [
@@ -37,7 +37,7 @@ def log_run(model, feature_names: list[str], alpha: float,
             c_index_train: float, c_index_test: float, notes: str = "") -> str:
     """
     Saves the model to models/{run_id}.joblib and appends one row to
-    results/experiments.csv. Returns the run_id so the caller can print
+    results/modeling/experiments.csv. Returns the run_id so the caller can print
     it / reference it.
     """
     os.makedirs(MODELS_DIR, exist_ok=True)

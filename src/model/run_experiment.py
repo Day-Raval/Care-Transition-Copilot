@@ -1,6 +1,6 @@
 """
 Trains one Cox model configuration and logs it to the experiment registry
-(results/experiments.csv + models/{run_id}.joblib).
+(results/modeling/experiments.csv + models/{run_id}.joblib).
 
 Usage:
     python3 -m src.model.run_experiment --alpha 1.0 --notes "baseline, 6 features"

@@ -112,6 +112,8 @@ class OIDCAuthenticationTest(unittest.TestCase):
             patch.object(main, "_latest_discharge_ts", return_value="2026-09-24"),
             patch.object(main, "_assessment_cache_get", return_value=SimpleNamespace(draft_plan="Follow-up plan")),
             patch.object(main, "save_decision", return_value=stored_decision) as save_decision,
+            patch.object(main, "record_fhir_writeback", return_value={"status": "stub_recorded"}),
+            patch.object(main, "notify_care_plan_decision", return_value={"channel": "portal_stub", "status": "queued"}),
             patch.object(main, "log_audit_event"),
             self.configure_jwks(),
         ):

@@ -17,6 +17,7 @@ logs/
 # Trained models
 models/*.joblib
 results/prediction_log.csv
+results/operations/prediction_log.csv
 
 # Chroma database for vector store
 data/processed/chroma_db/
@@ -45,6 +46,7 @@ yarn-error.log*
 
 # Results
 results/*.jsonl
+results/**/*.jsonl
 
 # SQLite runtime databases
 *.sqlite3

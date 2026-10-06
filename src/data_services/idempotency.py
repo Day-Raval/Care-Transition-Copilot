@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_MEMORY_CACHE = 10000
 RESULTS_DIR = Path("results")
-IDEMPOTENCY_DB_PATH = RESULTS_DIR / "idempotency.sqlite3"
+IDEMPOTENCY_DB_PATH = RESULTS_DIR / "operations" / "idempotency.sqlite3"
 
 
 class IdempotencyTracker:

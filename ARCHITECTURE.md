@@ -153,7 +153,7 @@ patient do not leak across train and test folds.
 ### 5.3 Experiment Registry
 
 `src/model/experiment_registry.py` logs model runs to
-`results/experiments.csv` and stores regenerable model artifacts under
+`results/modeling/experiments.csv` and stores regenerable model artifacts under
 `models/{run_id}.joblib`.
 
 The API loads the production run configured in `config.yaml`.
@@ -282,11 +282,13 @@ request IDs for traceability.
 
 Current local persistence uses:
 
-- `results/audit_log.jsonl` for audit events.
-- `results/care_plans.jsonl` for generated care plans.
-- `results/decisions.sqlite3` for clinician decisions.
-- `results/prediction_log.csv` for served predictions.
-- `results/notifications.jsonl` for approved-plan notification outcomes.
+- `results/operations/audit_log.jsonl` for audit events.
+- `results/operations/prediction_log.csv` for served predictions.
+- `results/operations/idempotency.sqlite3` for stream-processing duplicate suppression.
+- `results/care_delivery/care_plans.jsonl` for generated care plans.
+- `results/care_delivery/decisions.sqlite3` for clinician decisions.
+- `results/care_delivery/notifications.jsonl` for approved-plan notification outcomes.
+- `results/care_delivery/fhir_writebacks.jsonl` for local FHIR write-back stubs.
 - `reports/*.md` for approved mock transition reports.
 
 These are local MVP stores. Production architecture should replace them with

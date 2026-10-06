@@ -41,10 +41,13 @@ from src.data_services.notifications import (
 from src.utils.config import Config
 
 RESULTS_DIR = Path("results")
-AUDIT_LOG_PATH = RESULTS_DIR / "audit_log.jsonl"
-CARE_PLANS_PATH = RESULTS_DIR / "care_plans.jsonl"
-NOTIFICATIONS_PATH = RESULTS_DIR / "notifications.jsonl"
-DECISIONS_DB_PATH = RESULTS_DIR / "decisions.sqlite3"
+OPERATIONS_RESULTS_DIR = RESULTS_DIR / "operations"
+CARE_DELIVERY_RESULTS_DIR = RESULTS_DIR / "care_delivery"
+AUDIT_LOG_PATH = OPERATIONS_RESULTS_DIR / "audit_log.jsonl"
+CARE_PLANS_PATH = CARE_DELIVERY_RESULTS_DIR / "care_plans.jsonl"
+NOTIFICATIONS_PATH = CARE_DELIVERY_RESULTS_DIR / "notifications.jsonl"
+FHIR_WRITEBACKS_PATH = CARE_DELIVERY_RESULTS_DIR / "fhir_writebacks.jsonl"
+DECISIONS_DB_PATH = CARE_DELIVERY_RESULTS_DIR / "decisions.sqlite3"
 REPORTS_DIR = Path("reports")
 CHROMA_PATH = "data/processed/chroma_db"
 DEFAULT_ACTOR = "demo_clinician"
@@ -114,6 +117,17 @@ _notifications_table = Table(
     Column("discharge_ts", String, nullable=True),
     Column("channel", String, nullable=True),
     Column("status", String, nullable=True),
+    Column("payload_json", Text, nullable=False),
+)
+
+_fhir_writebacks_table = Table(
+    "fhir_writebacks",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("patient_id", String, nullable=False),
+    Column("discharge_ts", String, nullable=False),
+    Column("status", String, nullable=False),
     Column("payload_json", Text, nullable=False),
 )
 
@@ -378,6 +392,62 @@ def read_notifications(limit: int = 100) -> list[dict[str, Any]]:
     return read_jsonl(NOTIFICATIONS_PATH, limit=limit)
 
 
+def record_fhir_writeback(assessment: Any, decision: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "timestamp": utc_now(),
+        "patient_id": decision["patient_id"],
+        "discharge_ts": decision["discharge_ts"],
+        "status": "stub_recorded",
+        "resource_type": "CarePlan",
+        "resource": {
+            "resourceType": "CarePlan",
+            "status": "active",
+            "intent": "plan",
+            "subject": {"reference": f"Patient/{decision['patient_id']}"},
+            "description": decision["draft_plan"],
+            "note": [{"text": f"Approved by {decision['actor']} at {decision['decided_at']}"}],
+            "extension": [
+                {"url": "riskCategory", "valueString": assessment.risk_category},
+                {"url": "riskPercentile", "valueDecimal": assessment.risk_percentile},
+            ],
+        },
+    }
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _fhir_writebacks_table.insert().values(
+                    timestamp=record["timestamp"],
+                    patient_id=record["patient_id"],
+                    discharge_ts=record["discharge_ts"],
+                    status=record["status"],
+                    payload_json=_json_dumps(record),
+                )
+            )
+    else:
+        append_jsonl(FHIR_WRITEBACKS_PATH, record)
+    return record
+
+
+def read_fhir_writebacks(limit: int = 100) -> list[dict[str, Any]]:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM fhir_writebacks
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            return [json.loads(row.payload_json) for row in rows]
+    return read_jsonl(FHIR_WRITEBACKS_PATH, limit=limit)
+
+
 def medication_context(summary: str) -> str:
     lines = [line.strip() for line in summary.splitlines() if "medication" in line.lower()]
     medications = []
@@ -428,7 +498,7 @@ def init_decision_db() -> None:
         _ensure_database_schema(_db_engine())
         return
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    DECISIONS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DECISIONS_DB_PATH) as conn:
         conn.execute(
             """

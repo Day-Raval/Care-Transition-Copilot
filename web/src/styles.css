@@ -330,6 +330,8 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
   gap: 20px;
   align-items: start;
 }
+.ops-stack { display: grid; gap: 20px; }
+.ops-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .filter-row {
   display: grid;
   grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) auto auto;

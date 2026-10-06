@@ -1,4 +1,5 @@
 import unittest
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -16,9 +17,11 @@ class RequestIdTest(unittest.TestCase):
         self.assertEqual(response.headers["X-Request-ID"], "demo-request-1")
 
     def test_audit_event_includes_context_request_id(self):
+        old_backend = os.environ.get("PERSISTENCE_BACKEND")
         original_path = production.AUDIT_LOG_PATH
         with TemporaryDirectory() as tmpdir:
             try:
+                os.environ["PERSISTENCE_BACKEND"] = "local"
                 production.AUDIT_LOG_PATH = Path(tmpdir) / "audit_log.jsonl"
                 token = production.set_audit_request_id("demo-request-2")
                 try:
@@ -32,3 +35,7 @@ class RequestIdTest(unittest.TestCase):
                 self.assertEqual(events[0]["request_id"], "demo-request-2")
             finally:
                 production.AUDIT_LOG_PATH = original_path
+                if old_backend is None:
+                    os.environ.pop("PERSISTENCE_BACKEND", None)
+                else:
+                    os.environ["PERSISTENCE_BACKEND"] = old_backend

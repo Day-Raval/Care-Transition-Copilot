@@ -65,7 +65,7 @@ def required_roles(method: str, path: str) -> set[str] | None:
         return {"care_coordinator", "clinician", "admin"}
     if path == "/model-info":
         return {"care_coordinator", "clinician", "data_scientist", "admin"}
-    if method == "GET" and path in {"/audit-events", "/notifications"}:
+    if method == "GET" and path in {"/audit-events", "/notifications", "/fhir-writebacks"}:
         return {"clinician", "admin"}
     if method == "GET" and path.startswith(("/patients", "/care-plans")):
         return {"care_coordinator", "clinician", "admin"}

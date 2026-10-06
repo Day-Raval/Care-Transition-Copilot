@@ -229,7 +229,7 @@ The current repository shows the first stage of the MVP working locally:
 - Added a comorbidity-count diagnostic that compares Cox performance with and
   without `comorbidity_count`, helping decide whether to keep the feature out
   for interpretability or restore it for stronger risk ranking.
-- Added a lightweight experiment registry in `results/experiments.csv`, with
+- Added a lightweight experiment registry in `results/modeling/experiments.csv`, with
   every logged run tied to a saved `models/{run_id}.joblib` artifact. The saved
   model artifacts are regenerable and gitignored.
 - Added `src.model.compare_experiments` to compare logged runs side by side and
@@ -290,8 +290,8 @@ The current repository shows the first stage of the MVP working locally:
   responses, required `API_KEY` protection for non-health endpoints, `/health`
   dependency checks, OIDC bearer-token verification with role-based route
   checks, configurable LLM/risk-API timeouts, optional Redis-backed assessment
-  caching, file-based audit logging in `results/audit_log.jsonl`, and saved
-  generated care plans in `results/care_plans.jsonl`.
+  caching, file-based audit logging in `results/operations/audit_log.jsonl`,
+  and saved generated care plans in `results/care_delivery/care_plans.jsonl`.
 - Added the first React clinician workflow beyond the risk queue:
   `/patients` lists recent discharged patients, `/care-plans` lets a user select
   a patient and generate/view a draft follow-up plan, and `/chat` renders
@@ -299,7 +299,7 @@ The current repository shows the first stage of the MVP working locally:
 - Added episode-specific assessment and decision APIs. Assessments now accept an
   optional `discharge_ts`, cache generated agent results for the configured
   `CACHE_TTL_SECONDS` in memory or Redis, and the dashboard can record
-  approve/reject decisions to `results/decisions.sqlite3`.
+  approve/reject decisions to `results/care_delivery/decisions.sqlite3`.
 - Added request tracing with `X-Request-ID` across the API and web client so UI
   errors can be matched to server logs. Care-plan decisions are now idempotent
   per patient episode and store the acting clinician label, using the configured
@@ -323,7 +323,7 @@ The current repository shows the first stage of the MVP working locally:
   sub-blocks.
 - Validated the Patient evidence formatter against live `/patients/{id}/assessment`
   responses and exact real discharge-note excerpts from
-  `data/processed/discharge_notes.jsonl`; see `results/RESULTS.md` for the
+  `data/processed/discharge_notes.jsonl`; see `results/modeling/RESULTS.md` for the
   before/after details.
 - Name suffix digits from synthetic Synthea patients are removed in display only.
 - Rebranded the care-plan third section from "Documentation gaps" to
@@ -370,7 +370,7 @@ The official baseline v1 registry run is `20260915_113931_cdd23e`: Cox
 Proportional Hazards, `alpha=1.0`, six features, 1,967 train episodes, 678 test
 episodes, 40 train events, 12 test events, and train/test C-index
 `0.7757 / 0.6844`. The single split is noisier than the grouped CV summary, so
-the README and `results/RESULTS.md` treat the CV comparison as the more reliable
+the README and `results/modeling/RESULTS.md` treat the CV comparison as the more reliable
 model-selection evidence.
 
 Latest retrieval/vector-store summary:
@@ -627,7 +627,7 @@ python scripts/run_kafka_consumer.py --workers 4 --max-in-flight 50
 The consumer group defaults to `care-transition-copilot-consumers`; override it
 with `KAFKA_CONSUMER_GROUP_ID` or the runner's `--group-id` flag. It reads the
 discharge episode and audit-event topics, uses a local SQLite idempotency store
-at `results/idempotency.sqlite3` by default, retries failed handlers, and sends
+at `results/operations/idempotency.sqlite3` by default, retries failed handlers, and sends
 malformed or unprocessable messages to the DLQ topic. The `/health` response
 includes `kafka_consumer` stats when the background consumer is enabled.
 
@@ -836,10 +836,20 @@ data/
 `-- processed/                     # CSV/JSONL outputs and local Chroma DB
 
 results/
-|-- RESULTS.md                     # Narrative summary of current model findings
-|-- experiments.csv                # Logged training runs
-|-- decisions.sqlite3              # Local approve/reject care-plan decisions, gitignored
-`-- fairness_audit_*.txt           # Timestamped fairness-audit reports
+|-- README.md                      # Guide to the result folders
+|-- modeling/                      # Model evaluation and training outputs
+|   |-- RESULTS.md                 # Narrative summary of current model findings
+|   |-- experiments.csv            # Logged training runs
+|   `-- fairness_audits/           # Timestamped fairness-audit reports
+|-- operations/                    # API/runtime logs and stream state
+|   |-- audit_log.jsonl            # API audit events
+|   |-- prediction_log.csv         # Served prediction drift log
+|   `-- idempotency.sqlite3        # Kafka duplicate-suppression state
+`-- care_delivery/                 # Clinician workflow artifacts
+    |-- care_plans.jsonl           # Generated care plans
+    |-- decisions.sqlite3          # Local approve/reject decisions, gitignored
+    |-- notifications.jsonl        # Notification outcomes
+    `-- fhir_writebacks.jsonl      # Local FHIR write-back stubs
 
 database/
 |-- README.md              # Postgres workflow notes

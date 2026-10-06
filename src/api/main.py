@@ -13,7 +13,7 @@ can silently drift apart.
 
 DRIFT MONITORING:
 Every served prediction is logged (inputs + output) to
-results/prediction_log.csv. /drift-report compares the recent log against
+results/operations/prediction_log.csv. /drift-report compares the recent log against
 the training reference distribution using a Kolmogorov-Smirnov test, for
 both individual features (DATA drift) and the model's own output
 distribution (PREDICTION drift) — gated on a minimum sample size so it
@@ -28,7 +28,7 @@ calls). CORS enabled for the Vite dev server.
 Also deliberately honest about two things easy to misrepresent by
 accident: Cox's predict() output is a risk SCORE, not a probability
 (only meaningful in relative terms); and this model's fairness audit is
-INCONCLUSIVE, not passed (see results/RESULTS.md) — every response
+INCONCLUSIVE, not passed (see results/modeling/RESULTS.md) — every response
 carries that disclaimer.
 """
 
@@ -69,7 +69,9 @@ from src.api.production import (
     notify_care_plan_decision,
     read_audit_events,
     read_care_plans,
+    read_fhir_writebacks,
     read_notifications,
+    record_fhir_writeback,
     reset_audit_request_id,
     runtime_dependency_report,
     save_care_plan,
@@ -113,7 +115,7 @@ logger = logging.getLogger(__name__)
 DISCLAIMER = (
     "Research/portfolio baseline model. Trained on ~52 positive events — "
     "treat as directional, not precise. Fairness audit INCONCLUSIVE for "
-    "sex and race at current dataset size (see results/RESULTS.md). "
+    "sex and race at current dataset size (see results/modeling/RESULTS.md). "
     "Not validated for clinical use."
 )
 
@@ -544,7 +546,7 @@ def load_production_model():
     if not cfg.production_run_id:
         raise RuntimeError(
             "config.yaml has no model.production_run_id set. Check "
-            "results/experiments.csv for the run you want to serve, then add:\n"
+            "results/modeling/experiments.csv for the run you want to serve, then add:\n"
             "  model:\n    production_run_id: \"<run_id>\"\nto config.yaml."
         )
     if not dependencies["checks"]["processed_dataset"]:
@@ -643,7 +645,7 @@ def model_info():
         model_type=type(_state["model"]).__name__,
         features=_state["feature_names"],
         training_events=_state["training_events"],
-        fairness_status="INCONCLUSIVE — see results/RESULTS.md",
+        fairness_status="INCONCLUSIVE — see results/modeling/RESULTS.md",
         disclaimer=DISCLAIMER,
     )
 
@@ -838,6 +840,14 @@ def decide_patient_plan(
             channel=notification["channel"],
             status=notification["status"],
         )
+        writeback = record_fhir_writeback(assessment, record)
+        log_audit_event(
+            "fhir_writeback_recorded",
+            patient_id=patient_id,
+            discharge_ts=episode_discharge_ts,
+            actor=actor,
+            status=writeback["status"],
+        )
     return DecisionRecord(**record, patient_ref=_patient_ref(patient_id))
 
 
@@ -887,6 +897,11 @@ def saved_care_plans(limit: int = 50):
 @app.get("/notifications")
 def saved_notifications(limit: int = 50):
     return [_redact_patient_record(record) for record in read_notifications(limit=limit)]
+
+
+@app.get("/fhir-writebacks")
+def saved_fhir_writebacks(limit: int = 50):
+    return [_redact_patient_record(record) for record in read_fhir_writebacks(limit=limit)]
 
 
 @app.get("/audit-events")

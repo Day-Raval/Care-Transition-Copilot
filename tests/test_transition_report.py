@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from src.api import main
 from src.api import production
-from src.api.production import build_transition_report, save_transition_report
+from src.api.production import build_transition_report, record_fhir_writeback, save_transition_report
 
 
 class TransitionReportTest(unittest.TestCase):
@@ -72,3 +72,25 @@ class TransitionReportTest(unittest.TestCase):
             main._state.update(old_state)
             main._latest_discharge_ts = old_latest_discharge_ts
             main.latest_decision = old_latest_decision
+
+    def test_fhir_writeback_stub_persists_care_plan_resource(self):
+        original_path = production.FHIR_WRITEBACKS_PATH
+        assessment = SimpleNamespace(risk_category="high", risk_percentile=91.2)
+        decision = {
+            "patient_id": "patient-1",
+            "discharge_ts": "2026-09-24",
+            "decided_at": "2026-09-24T11:00:00+00:00",
+            "actor": "Dr. Patel",
+            "draft_plan": "Follow up with cardiology within 7 days.",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            production.FHIR_WRITEBACKS_PATH = Path(tmpdir) / "fhir_writebacks.jsonl"
+            try:
+                record = record_fhir_writeback(assessment, decision)
+                saved = production.read_fhir_writebacks(limit=10)
+
+                self.assertEqual(record["status"], "stub_recorded")
+                self.assertEqual(saved[0]["resource"]["resourceType"], "CarePlan")
+                self.assertIn("Follow up with cardiology", saved[0]["resource"]["description"])
+            finally:
+                production.FHIR_WRITEBACKS_PATH = original_path

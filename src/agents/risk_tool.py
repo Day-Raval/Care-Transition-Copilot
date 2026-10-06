@@ -76,7 +76,7 @@ def assess_risk(patient_id: str, discharge_ts: str | None = None) -> dict:
                     "disclaimer": (
                         "Research/portfolio baseline model. Trained on ~52 positive events — "
                         "treat as directional, not precise. Fairness audit INCONCLUSIVE for "
-                        "sex and race at current dataset size (see results/RESULTS.md)."
+                        "sex and race at current dataset size (see results/modeling/RESULTS.md)."
                     ),
                 }
     except Exception:

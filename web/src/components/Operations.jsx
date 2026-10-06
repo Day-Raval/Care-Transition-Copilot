@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getAuditEvents, getNotifications } from "../api.js";
+import {
+  getAuditEvents,
+  getDriftReport,
+  getFhirWritebacks,
+  getHealth,
+  getModelInfo,
+  getNotifications,
+} from "../api.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
 function prettyDate(value) {
@@ -17,9 +24,32 @@ function EventDetails({ event }) {
   return <pre className="event-details">{JSON.stringify(details, null, 2)}</pre>;
 }
 
+function resultValue(result, fallback = null) {
+  return result.status === "fulfilled" ? result.value : fallback;
+}
+
+function resultError(result) {
+  return result.status === "rejected" ? result.reason.message : null;
+}
+
+function CheckList({ checks }) {
+  if (!checks) return null;
+  return (
+    <div className="ops-checks">
+      {Object.entries(checks).map(([name, ok]) => (
+        <span className={`pill ${ok ? "pill-ok" : "pill-warn"}`} key={name}>
+          {name.replaceAll("_", " ")}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function Operations() {
   const [events, setEvents] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [writebacks, setWritebacks] = useState([]);
+  const [system, setSystem] = useState({ health: null, model: null, drift: null, errors: [] });
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -27,15 +57,27 @@ export default function Operations() {
   function loadEvents(filters = {}) {
     setLoading(true);
     setError(null);
-    Promise.all([
+    Promise.allSettled([
       getAuditEvents({ limit: 100, requestId: filters.requestId ?? requestId }),
       getNotifications(50),
+      getFhirWritebacks(50),
+      getHealth(),
+      getModelInfo(),
+      getDriftReport(),
     ])
-      .then(([auditResult, notificationResult]) => {
-        setEvents(auditResult);
-        setNotifications(notificationResult);
+      .then(([auditResult, notificationResult, writebackResult, healthResult, modelResult, driftResult]) => {
+        setEvents(resultValue(auditResult, []));
+        setNotifications(resultValue(notificationResult, []));
+        setWritebacks(resultValue(writebackResult, []));
+        setSystem({
+          health: resultValue(healthResult),
+          model: resultValue(modelResult),
+          drift: resultValue(driftResult),
+          errors: [healthResult, modelResult, driftResult].map(resultError).filter(Boolean),
+        });
+        const primaryError = resultError(auditResult) || resultError(notificationResult) || resultError(writebackResult);
+        if (primaryError) setError(primaryError);
       })
-      .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }
 
@@ -90,27 +132,83 @@ export default function Operations() {
         )}
       </div>
 
-      <div className="panel">
-        <h2>Notifications</h2>
-        <p className="panel-subtitle">Approved-plan handoffs recorded after clinician decisions</p>
+      <div className="ops-stack">
+        <div className="panel">
+          <h2>System visibility</h2>
+          <p className="panel-subtitle">Runtime checks, model metadata, and drift status</p>
 
-        {!loading && !error && notifications.length === 0 && <EmptyState>No notifications recorded yet.</EmptyState>}
-        {!loading && !error && notifications.length > 0 && (
-          <div className="event-list">
-            {notifications.map((notification, index) => (
-              <div className="event-row" key={`${notification.timestamp}-${index}`}>
-                <div className="event-title">
-                  {notification.channel || "notification"}: {notification.status || "recorded"}
-                </div>
-                <div className="event-meta">
-                  {prettyDate(notification.timestamp)}
-                  {notification.patient_ref && ` | patient ${shortId(notification.patient_ref)}`}
-                </div>
-                {notification.message && <p className="muted">{notification.message}</p>}
+          {loading && <LoadingState>Loading status...</LoadingState>}
+          {!loading && system.health && (
+            <>
+              <div className={`decision-badge ${system.health.status === "ok" ? "approved" : "rejected"}`}>
+                API {system.health.status}
               </div>
-            ))}
-          </div>
-        )}
+              <CheckList checks={system.health.dependencies?.checks} />
+              <div className="event-meta">Kafka: {system.health.kafka_consumer?.status || "unknown"}</div>
+            </>
+          )}
+          {!loading && system.model && (
+            <div className="event-row">
+              <div className="event-title">{system.model.model_type} | {system.model.model_run_id}</div>
+              <div className="event-meta">
+                {system.model.training_events} training events | {system.model.fairness_status}
+              </div>
+            </div>
+          )}
+          {!loading && system.drift && (
+            <div className="event-row">
+              <div className="event-title">Drift: {system.drift.status}</div>
+              <div className="event-meta">{system.drift.n_recent_predictions} recent predictions</div>
+            </div>
+          )}
+          {!loading && system.errors.map((message) => (
+            <p className="muted" key={message}>{message}</p>
+          ))}
+        </div>
+
+        <div className="panel">
+          <h2>FHIR write-backs</h2>
+          <p className="panel-subtitle">Approved-plan CarePlan resources recorded by the local stub</p>
+
+          {!loading && !error && writebacks.length === 0 && <EmptyState>No write-backs recorded yet.</EmptyState>}
+          {!loading && !error && writebacks.length > 0 && (
+            <div className="event-list">
+              {writebacks.map((writeback, index) => (
+                <div className="event-row" key={`${writeback.timestamp}-${index}`}>
+                  <div className="event-title">{writeback.resource_type || "FHIR"}: {writeback.status}</div>
+                  <div className="event-meta">
+                    {prettyDate(writeback.timestamp)}
+                    {writeback.patient_ref && ` | patient ${shortId(writeback.patient_ref)}`}
+                  </div>
+                  <EventDetails event={writeback} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Notifications</h2>
+          <p className="panel-subtitle">Approved-plan handoffs recorded after clinician decisions</p>
+
+          {!loading && !error && notifications.length === 0 && <EmptyState>No notifications recorded yet.</EmptyState>}
+          {!loading && !error && notifications.length > 0 && (
+            <div className="event-list">
+              {notifications.map((notification, index) => (
+                <div className="event-row" key={`${notification.timestamp}-${index}`}>
+                  <div className="event-title">
+                    {notification.channel || "notification"}: {notification.status || "recorded"}
+                  </div>
+                  <div className="event-meta">
+                    {prettyDate(notification.timestamp)}
+                    {notification.patient_ref && ` | patient ${shortId(notification.patient_ref)}`}
+                  </div>
+                  {notification.message && <p className="muted">{notification.message}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

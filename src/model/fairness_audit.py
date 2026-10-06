@@ -48,8 +48,10 @@ from src.utils.config import load_config
 MIN_EVENTS_FOR_AUDIT = 5  # below this, don't report a number — say so instead
 HIGH_RISK_PERCENTILE = 80  # "flagged for care management" = top 20% risk
 
-import os
 from datetime import datetime
+from pathlib import Path
+
+FAIRNESS_RESULTS_DIR = Path("results/modeling/fairness_audits")
 
 
 class Tee:
@@ -225,12 +227,12 @@ def print_overall_conclusion(sex_results: list[dict], race_results: list[dict]):
 
 
 if __name__ == "__main__":
-    os.makedirs("results", exist_ok=True)
+    FAIRNESS_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    report_path = f"results/fairness_audit_{timestamp}.txt"
+    report_path = FAIRNESS_RESULTS_DIR / f"fairness_audit_{timestamp}.txt"
 
     original_stdout = sys.stdout
-    with open(report_path, "w") as f:
+    with report_path.open("w") as f:
         sys.stdout = Tee(original_stdout, f)
         try:
             print(f"Fairness Audit — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")

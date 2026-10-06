@@ -69,9 +69,9 @@ The system shall read or produce:
 - Processed discharge records CSV under `data/processed`.
 - Discharge notes JSONL under `data/processed`.
 - Local ChromaDB vector store under `data/processed/chroma_db`.
-- Experiment registry under `results/experiments.csv`.
-- Saved audit, care-plan, fairness, decision, prediction, and report artifacts
-  under `results` and `reports`.
+- Experiment registry under `results/modeling/experiments.csv`.
+- Saved model, operations, care-delivery, and report artifacts under
+  `results` and `reports`.
 
 ### 3.4 External Services
 
@@ -112,7 +112,7 @@ planned and are not required for the local MVP.
 | --- | --- | --- | --- |
 | SRS-FR-010 | The system shall train a Cox proportional hazards baseline model. | Must | Run `python -m src.model.train_baseline`. |
 | SRS-FR-011 | The system shall compare Cox, Random Survival Forest, and Gradient Boosting Survival Analysis candidates with patient-grouped cross-validation. | Should | Run `python -m src.model.compare_models`. |
-| SRS-FR-012 | The system shall log experiment metadata to `results/experiments.csv`. | Must | Run `python -m src.model.run_experiment`. |
+| SRS-FR-012 | The system shall log experiment metadata to `results/modeling/experiments.csv`. | Must | Run `python -m src.model.run_experiment`. |
 | SRS-FR-013 | The system shall save model artifacts by run ID under `models`. | Must | Verify saved `.joblib` artifact. |
 | SRS-FR-014 | The system shall load the configured production run ID from `config.yaml`. | Must | Start API and call `/model-info`. |
 
@@ -172,8 +172,8 @@ planned and are not required for the local MVP.
 | ID | Requirement | Priority | Verification |
 | --- | --- | --- | --- |
 | SRS-FR-041 | The API shall cache full assessments per patient episode for a configurable TTL. | Should | Repeated assessment request test. |
-| SRS-FR-042 | The API shall save generated care plans to local JSONL. | Should | Inspect `results/care_plans.jsonl`. |
-| SRS-FR-043 | The API shall persist approve or reject decisions per patient ID and discharge timestamp. | Must | Tests for `results/decisions.sqlite3`. |
+| SRS-FR-042 | The API shall save generated care plans to local JSONL. | Should | Inspect `results/care_delivery/care_plans.jsonl`. |
+| SRS-FR-043 | The API shall persist approve or reject decisions per patient ID and discharge timestamp. | Must | Tests for `results/care_delivery/decisions.sqlite3`. |
 | SRS-FR-044 | Decision writes shall be idempotent per patient episode. | Must | Run decision idempotency test. |
 | SRS-FR-045 | Approved decisions shall allow report generation. | Must | GET report after approval. |
 | SRS-FR-046 | Rejected decisions shall return edit-required status and no final report. | Must | GET report after rejection. |

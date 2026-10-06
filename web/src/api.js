@@ -112,6 +112,10 @@ export function getNotifications(limit = 50) {
   return request(`/notifications?${new URLSearchParams({ limit })}`);
 }
 
+export function getFhirWritebacks(limit = 50) {
+  return request(`/fhir-writebacks?${new URLSearchParams({ limit })}`);
+}
+
 export function getAuditEvents({ limit = 100, requestId = "" } = {}) {
   const params = new URLSearchParams({ limit });
   if (requestId) params.set("request_id", requestId);
@@ -128,6 +132,14 @@ export function sendChatMessage(question) {
 
 export function getModelInfo() {
   return request("/model-info");
+}
+
+export function getHealth() {
+  return request("/health");
+}
+
+export function getDriftReport() {
+  return request("/drift-report");
 }
 
 export function triggerPrecompute({ category = "high", limit = 10, force = false } = {}) {

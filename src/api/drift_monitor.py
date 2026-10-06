@@ -30,7 +30,7 @@ from scipy.stats import ks_2samp
 
 from src.api.production import database_requested, log_model_prediction, read_recent_model_predictions
 
-PREDICTION_LOG_PATH = "results/prediction_log.csv"
+PREDICTION_LOG_PATH = "results/operations/prediction_log.csv"
 MIN_PREDICTIONS_FOR_DRIFT_CHECK = 30
 DRIFT_P_VALUE_THRESHOLD = 0.05
 
