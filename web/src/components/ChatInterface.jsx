@@ -19,7 +19,7 @@ function findCandidate(question, candidates) {
   const normalizedQuestion = normalizePatientText(question);
   return candidates.find((candidate) => {
     const normalizedName = normalizePatientText(candidate.name);
-    return question.includes(candidate.id) || normalizedQuestion.includes(normalizedName);
+    return normalizedQuestion.includes(normalizedName);
   });
 }
 
@@ -42,6 +42,7 @@ export default function ChatInterface() {
   const [candidates, setCandidates] = useState([]);
   const [pendingQuestion, setPendingQuestion] = useState("");
   const bottomRef = useRef(null);
+  const patientIdPattern = /\b(patient[_ -]?(id|ref)|mrn|medical record number|[0-9a-f]{16}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,18 +51,20 @@ export default function ChatInterface() {
   async function handleSend(rawQuestion = input) {
     const question = rawQuestion.trim();
     if (!question || sending) return;
+    if (patientIdPattern.test(question)) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: question },
+        { role: "assistant", content: "Patient IDs are not accepted in chat. Search by patient name instead.", isError: true },
+      ]);
+      setInput("");
+      return;
+    }
 
     const candidate = findCandidate(question, candidates);
     const activePatient = candidate || patient;
-    const hasPatientContext =
-      !activePatient ||
-      question.includes(activePatient.id) ||
-      /\b(patient|patient_ref)\b/i.test(question);
-    const apiQuestion = candidate
-      ? `For patient ${candidate.id}, ${pendingQuestion || question}`
-      : hasPatientContext
-        ? question
-        : `For patient ${activePatient.id}, ${question}`;
+    const patientName = activePatient?.name || null;
+    const apiQuestion = candidate ? pendingQuestion || question : question;
 
     if (candidate) {
       setPatient(candidate);
@@ -74,7 +77,7 @@ export default function ChatInterface() {
     setSending(true);
 
     try {
-      const result = await sendChatMessage(apiQuestion);
+      const result = await sendChatMessage(apiQuestion, patientName);
       const nextPatient = findPatient(result.tool_calls);
       if (nextPatient) setPatient(nextPatient);
       const nextCandidates = findCandidates(result.tool_calls);
@@ -82,7 +85,7 @@ export default function ChatInterface() {
       setPendingQuestion(nextCandidates.length ? apiQuestion : "");
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: result.answer, toolCalls: result.tool_calls },
+        { role: "assistant", content: result.answer },
       ]);
     } catch (e) {
       setMessages((prev) => [
@@ -108,7 +111,7 @@ export default function ChatInterface() {
         {patient && (
           <button className="patient-context" onClick={() => setPatient(null)} type="button">
             {patient.name || "Current patient"}
-            <span>Ref ...{patient.id.slice(-4)}</span>
+            <span>Patient ID masked</span>
           </button>
         )}
       </div>
@@ -130,18 +133,6 @@ export default function ChatInterface() {
                   m.content
                 )}
               </div>
-              {m.role === "assistant" && m.toolCalls?.length > 0 && (
-                <details className="tool-call-log">
-                  <summary>
-                    {m.toolCalls.length} tool call{m.toolCalls.length === 1 ? "" : "s"}
-                  </summary>
-                  {m.toolCalls.map((tc, j) => (
-                    <div key={j} className="tool-call">
-                      <span className="tool-name">{tc.name}</span>
-                    </div>
-                  ))}
-                </details>
-              )}
             </div>
           ))}
           {sending && <div className="muted thinking">Thinking...</div>}

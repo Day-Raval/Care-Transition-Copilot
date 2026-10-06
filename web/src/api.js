@@ -122,11 +122,11 @@ export function getAuditEvents({ limit = 100, requestId = "" } = {}) {
   return request(`/audit-events?${params}`);
 }
 
-export function sendChatMessage(question) {
+export function sendChatMessage(question, patientName = null) {
   return request("/chat", {
     method: "POST",
     timeoutMs: CHAT_TIMEOUT_MS,
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, patient_name: patientName }),
   });
 }
 

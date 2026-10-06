@@ -21,8 +21,8 @@ fix reuses the exact 5 category phrasings already validated throughout
 this project (see retrieval_agent.py's RETRIEVAL_CATEGORIES) instead of
 leaving query phrasing entirely to the model's judgment.
 
-find_patient_by_name added so users can refer to a patient by name
-instead of by patient_id. Normalizes digits out of both the query and
+find_patient_by_name added so users can refer to a patient by name.
+Normalizes digits out of both the query and
 the stored name before comparing — confirmed necessary via testing,
 since Synthea's generated names have digit suffixes baked in (e.g.
 "Hai304 Marvin195"), so a natural query like "Hai Marvin" fails a plain
@@ -35,9 +35,9 @@ TOOLS = [
         "function": {
             "name": "find_patient_by_name",
             "description": (
-                "Looks up a patient's patient_id from their name. Use this FIRST "
-                "whenever the user refers to a patient by name instead of by ID -- "
-                "the other tools require a patient_id, not a name. Matches "
+                "Looks up the internal patient key from their name. Use this FIRST "
+                "whenever the user refers to a patient by name. The other tools "
+                "require an internal patient key, not a name. Matches "
                 "partially and case-insensitively, so a first name or partial "
                 "name is enough. May return more than one match if the name is "
                 "ambiguous; ask the user to clarify which one if so."

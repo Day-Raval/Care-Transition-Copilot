@@ -29,10 +29,13 @@ export function renderMarkdown(text) {
     }
 
     const bold = line
+      .replace(/\\([*_`])/g, "$1")
       .replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<strong>$1</strong>");
 
     const headingMatch = bold.match(/^(#{1,3})\s+(.*)/);
+    const sectionMatch = bold.match(/^<strong>([^<]+)<\/strong>:?$/);
     const bulletMatch = bold.match(/^[-*]\s+(.*)/);
     const numberedMatch = bold.match(/^\d+\.\s+(.*)/);
 
@@ -40,6 +43,9 @@ export function renderMarkdown(text) {
       closeList();
       const level = headingMatch[1].length + 2;
       html += `<h${level}>${headingMatch[2]}</h${level}>`;
+    } else if (sectionMatch) {
+      closeList();
+      html += `<h3>${sectionMatch[1]}</h3>`;
     } else if (bulletMatch) {
       if (inList !== "ul") {
         closeList();

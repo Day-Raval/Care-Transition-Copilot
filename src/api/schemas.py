@@ -19,7 +19,7 @@ which features the model uses internally.
 
 from typing import Literal, Type
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from src.api.feature_specs import get_spec
 
@@ -110,7 +110,10 @@ class FullAssessment(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: str
+    patient_name: str | None = None
 
 
 class ChatToolCall(BaseModel):

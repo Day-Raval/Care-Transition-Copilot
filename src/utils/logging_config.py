@@ -20,6 +20,9 @@ def setup_logging(log_dir: str = "logs", log_file: str = "pipeline.log", level: 
     if _CONFIGURED:
         return
 
+    if os.getenv("API_ACCESS_LOGS", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        logging.getLogger("uvicorn.access").disabled = True
+
     os.makedirs(log_dir, exist_ok=True)
 
     root = logging.getLogger()

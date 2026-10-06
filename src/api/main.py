@@ -38,6 +38,7 @@ import logging
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -118,6 +119,8 @@ DISCLAIMER = (
     "sex and race at current dataset size (see results/modeling/RESULTS.md). "
     "Not validated for clinical use."
 )
+MASKED_PATIENT_ID = "[masked patient ID]"
+PATIENT_ID_GUARDRAIL = "Patient IDs are not accepted in chat. Search by patient name instead."
 
 app = FastAPI(
     title="Care Transition Copilot — Risk Model API",
@@ -228,7 +231,8 @@ async def request_context(request: Request, call_next):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
-    logger.exception("Unhandled API error path=%s request_id=%s", request.url.path, request_id)
+    route_path = getattr(request.scope.get("route"), "path", request.url.path)
+    logger.exception("Unhandled API error path=%s request_id=%s", route_path, request_id)
     return JSONResponse(
         status_code=500,
         content={
@@ -297,11 +301,11 @@ def _latest_discharge_ts(patient_id: str, discharge_ts: str | None = None) -> st
     queue_df = _state["queue_df"]
     patient_rows = queue_df[queue_df["patient_id"] == patient_id]
     if patient_rows.empty:
-        raise HTTPException(status_code=404, detail=f"No episode found for patient_id={patient_id}")
+        raise HTTPException(status_code=404, detail="No episode found for patient reference")
     if discharge_ts is not None:
         episode_rows = patient_rows[patient_rows["discharge_ts"].astype(str) == discharge_ts]
         if episode_rows.empty:
-            raise HTTPException(status_code=404, detail=f"No episode found for patient_id={patient_id} discharge_ts={discharge_ts}")
+            raise HTTPException(status_code=404, detail="No episode found for patient reference and discharge timestamp")
         return str(episode_rows.sort_values("discharge_ts").iloc[-1]["discharge_ts"])
     return str(patient_rows.sort_values("discharge_ts").iloc[-1]["discharge_ts"])
 
@@ -354,13 +358,39 @@ def _replace_patient_refs_with_ids(text: str) -> str:
     return text
 
 
+def _mask_patient_ids(text: str) -> str:
+    text = re.sub(
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+        MASKED_PATIENT_ID,
+        text,
+    )
+    if _state and "queue_df" in _state:
+        for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
+            text = text.replace(patient_id, MASKED_PATIENT_ID).replace(_patient_ref(patient_id), MASKED_PATIENT_ID)
+    return text
+
+
+def _contains_patient_identifier(text: str) -> bool:
+    if re.search(r"\b(patient[_ -]?(id|ref)|mrn|medical record number)\b", text, re.I):
+        return True
+    if re.search(r"\b[0-9a-fA-F]{16}\b", text):
+        return True
+    if re.search(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", text):
+        return True
+    if _state and "queue_df" in _state:
+        for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
+            if patient_id in text or _patient_ref(patient_id) in text:
+                return True
+    return False
+
+
 def _redact_chat_payload(payload: dict[str, Any]) -> dict[str, Any]:
     redacted = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    redacted["answer"] = _mask_patient_ids(str(redacted.get("answer", "")))
     if not _state or "queue_df" not in _state:
         return redacted
     for patient_id in _state["queue_df"]["patient_id"].drop_duplicates().astype(str):
         ref = _patient_ref(patient_id)
-        redacted["answer"] = redacted["answer"].replace(patient_id, ref)
         for call in redacted["tool_calls"]:
             if call.get("arguments", {}).get("patient_id") == patient_id:
                 call["arguments"].pop("patient_id", None)
@@ -918,8 +948,15 @@ def chat(request: ChatRequest):
     """Wraps the tool-calling chat agent (src/agents/chat_agent.py)."""
     from src.agents.chat_agent import ask
 
+    if _contains_patient_identifier(request.question):
+        raise HTTPException(status_code=400, detail=PATIENT_ID_GUARDRAIL)
+
+    question = request.question
+    if request.patient_name:
+        question = f"For patient {request.patient_name}, {question}"
+
     try:
-        result = ask(_replace_patient_refs_with_ids(request.question))
+        result = ask(question)
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
