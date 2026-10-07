@@ -80,13 +80,13 @@ class PatientPrivacyTest(unittest.TestCase):
             patch("src.agents.chat_agent.ask", return_value={"answer": "Done", "tool_calls": []}) as ask,
             patch.object(main, "log_audit_event"),
         ):
-            response = main.chat(main.ChatRequest(question="Summarize meds", patient_name="Jane Example"))
+            response = main.chat(main.ChatRequest(question="Summarize discharge plan", patient_name="Jane Example"))
 
         self.assertEqual(response.answer, "Done")
         prompt = ask.call_args.args[0]
         self.assertIn("already resolved internally as patient_id patient-1", prompt)
         self.assertIn("do not search by surname again", prompt)
-        self.assertIn("Summarize meds", prompt)
+        self.assertIn("Summarize discharge plan", prompt)
 
     def test_chat_fast_path_answers_readmission_risk_without_llm(self):
         with (
@@ -106,6 +106,28 @@ class PatientPrivacyTest(unittest.TestCase):
         self.assertIn("Heart failure", response.answer)
         self.assertNotIn("percentile", response.answer.lower())
         self.assertNotIn("91", response.answer)
+
+    def test_chat_fast_path_answers_medications_without_overclaiming(self):
+        chart_results = [
+            {
+                "section": "Medications",
+                "text": "Medications: Allergies: No Known Allergies. lisinopril 10mg oral tablet; ondansetron 2 mg/ml injection",
+            }
+        ]
+        with (
+            patch("src.agents.chat_agent.ask") as ask,
+            patch("src.retrieval.query_store.get_collection", return_value=object()),
+            patch("src.retrieval.query_store.retrieve_relevant_context", return_value=chart_results),
+            patch.object(main, "log_audit_event"),
+        ):
+            response = main.chat(main.ChatRequest(question="Does Jane Example have meds?", patient_name="Jane Example"))
+
+        ask.assert_not_called()
+        self.assertIn("Documented medications include", response.answer)
+        self.assertIn("lisinopril 10mg oral tablet", response.answer)
+        self.assertIn("ondansetron 2 mg/ml injection", response.answer)
+        self.assertNotIn("comprehensive", response.answer.lower())
+        self.assertNotIn("allerg", response.answer.lower())
 
     def test_chat_request_rejects_patient_ref_field(self):
         with self.assertRaises(ValueError):

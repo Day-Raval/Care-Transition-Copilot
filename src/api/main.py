@@ -419,38 +419,81 @@ def _resolve_patient_name(name: str) -> dict[str, str] | None:
     return {"patient_id": str(row.patient_id), "patient_name": str(row.patient_name)}
 
 
+def _medication_items_from_context(results: list[dict[str, Any]]) -> list[str]:
+    items = []
+    seen = set()
+    for result in results:
+        text = re.sub(r"Allergies:\s*No Known Allergies\.?\.?\s*", "", str(result.get("text", "")), flags=re.I)
+        text = re.sub(r"^.*?medications?:\s*", "", text, flags=re.I | re.S)
+        text = re.sub(r"^The patient was prescribed the following medications:\s*", "", text, flags=re.I)
+        for part in re.split(r"\n|;", text):
+            item = re.sub(r"^[-*\s]+", "", part).strip(" .")
+            if not item or "allerg" in item.lower():
+                continue
+            key = re.sub(r"[^a-z0-9]+", " ", item.lower()).strip()
+            if key and key not in seen:
+                seen.add(key)
+                items.append(item)
+    return items
+
+
 def _chat_fast_path(question: str, resolved_patient: dict[str, str] | None) -> dict[str, Any] | None:
     if not resolved_patient:
         return None
     normalized = re.sub(r"[^a-z ]", " ", question.lower())
     normalized = re.sub(r"\s+", " ", normalized).strip()
-    if normalized not in {"review readmission risk", "readmission risk", "risk"}:
-        return None
+    if normalized in {"review readmission risk", "readmission risk", "risk"}:
+        from src.agents.risk_tool import assess_risk
+        from src.agents.tools import RISK_INTERPRETATION
 
-    from src.agents.risk_tool import assess_risk
-    from src.agents.tools import RISK_INTERPRETATION
+        result = assess_risk(resolved_patient["patient_id"])
+        category = str(result["risk_category"]).lower()
+        interpretation = RISK_INTERPRETATION.get(
+            category,
+            "Review the care plan and discharge context to decide follow-up urgency.",
+        )
+        tool_result = (
+            f"Readmission risk: {category}. "
+            f"Plain-language interpretation: {interpretation} "
+            f"admission reason: {result['admission_reason']}"
+        )
+        return {
+            "answer": f"This patient is {category} risk. {interpretation} Admission reason: {result['admission_reason']}.",
+            "tool_calls": [
+                {
+                    "name": "assess_readmission_risk",
+                    "arguments": {"patient_id": resolved_patient["patient_id"]},
+                    "result": tool_result,
+                }
+            ],
+        }
+    if re.search(r"\b(meds?|medications?|drugs?|prescriptions?)\b", normalized):
+        from src.retrieval.query_store import get_collection, retrieve_relevant_context
 
-    result = assess_risk(resolved_patient["patient_id"])
-    category = str(result["risk_category"]).lower()
-    interpretation = RISK_INTERPRETATION.get(
-        category,
-        "Review the care plan and discharge context to decide follow-up urgency.",
-    )
-    tool_result = (
-        f"Readmission risk: {category}. "
-        f"Plain-language interpretation: {interpretation} "
-        f"admission reason: {result['admission_reason']}"
-    )
-    return {
-        "answer": f"This patient is {category} risk. {interpretation} Admission reason: {result['admission_reason']}.",
-        "tool_calls": [
-            {
-                "name": "assess_readmission_risk",
-                "arguments": {"patient_id": resolved_patient["patient_id"]},
-                "result": tool_result,
-            }
-        ],
-    }
+        query = "current medications at discharge"
+        results = retrieve_relevant_context(get_collection(), resolved_patient["patient_id"], query)
+        if not results:
+            answer = "I did not find medication-specific chart documentation for this patient."
+            tool_result = "No relevant medication documentation found."
+        else:
+            meds = _medication_items_from_context(results)
+            if meds:
+                answer = "Yes. Documented medications include:\n" + "\n".join(f"- {med}" for med in meds)
+                tool_result = "\n".join(f"[{r['section']}] {r['text']}" for r in results)
+            else:
+                answer = "Medication-related chart text was found, but I could not extract a clean medication list from it."
+                tool_result = "\n".join(f"[{r['section']}] {r['text']}" for r in results)
+        return {
+            "answer": answer,
+            "tool_calls": [
+                {
+                    "name": "search_patient_chart",
+                    "arguments": {"patient_id": resolved_patient["patient_id"], "query": query},
+                    "result": tool_result,
+                }
+            ],
+        }
+    return None
 
 
 def _redact_chat_payload(payload: dict[str, Any]) -> dict[str, Any]:
