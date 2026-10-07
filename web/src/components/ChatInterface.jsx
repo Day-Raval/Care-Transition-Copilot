@@ -106,7 +106,6 @@ export default function ChatInterface() {
       <div className="chat-header">
         <div>
           <h2>Patient chat</h2>
-          <p className="panel-subtitle">Ask by patient name.</p>
         </div>
         {patient && (
           <button className="patient-context" onClick={() => setPatient(null)} type="button">

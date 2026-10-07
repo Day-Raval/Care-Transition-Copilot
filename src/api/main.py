@@ -395,6 +395,30 @@ def _contains_patient_identifier(text: str) -> bool:
     return False
 
 
+def _normalize_patient_name(value: str) -> str:
+    without_digits = re.sub(r"\d+", "", str(value).lower())
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", without_digits)).strip()
+
+
+def _resolve_patient_name(name: str) -> dict[str, str] | None:
+    if not _state or "queue_df" not in _state:
+        return None
+    requested = _normalize_patient_name(name)
+    if not requested:
+        return None
+
+    rows = list(_state["queue_df"].itertuples())
+    matches = [row for row in rows if _normalize_patient_name(row.patient_name) == requested]
+    if len(matches) != 1:
+        matches = [row for row in rows if requested in _normalize_patient_name(row.patient_name)]
+
+    patient_ids = {str(row.patient_id) for row in matches}
+    if len(patient_ids) != 1:
+        return None
+    row = matches[0]
+    return {"patient_id": str(row.patient_id), "patient_name": str(row.patient_name)}
+
+
 def _redact_chat_payload(payload: dict[str, Any]) -> dict[str, Any]:
     redacted = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     redacted["answer"] = _mask_patient_ids(str(redacted.get("answer", "")))
@@ -1078,7 +1102,15 @@ def chat(request: ChatRequest):
 
     question = request.question
     if request.patient_name:
-        question = f"For patient {request.patient_name}, {question}"
+        resolved = _resolve_patient_name(request.patient_name)
+        if resolved:
+            question = (
+                f"For patient {resolved['patient_name']}, already resolved internally as "
+                f"patient_id {resolved['patient_id']}; use that patient_id for tools and do not search by surname again. "
+                f"{question}"
+            )
+        else:
+            question = f"For patient {request.patient_name}, {question}"
 
     try:
         result = ask(question)

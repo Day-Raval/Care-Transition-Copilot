@@ -83,7 +83,10 @@ class PatientPrivacyTest(unittest.TestCase):
             response = main.chat(main.ChatRequest(question="Summarize meds", patient_name="Jane Example"))
 
         self.assertEqual(response.answer, "Done")
-        ask.assert_called_once_with("For patient Jane Example, Summarize meds")
+        prompt = ask.call_args.args[0]
+        self.assertIn("already resolved internally as patient_id patient-1", prompt)
+        self.assertIn("do not search by surname again", prompt)
+        self.assertIn("Summarize meds", prompt)
 
     def test_chat_request_rejects_patient_ref_field(self):
         with self.assertRaises(ValueError):
