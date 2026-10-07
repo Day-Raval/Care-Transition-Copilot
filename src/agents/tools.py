@@ -57,8 +57,8 @@ TOOLS = [
             "name": "assess_readmission_risk",
             "description": (
                 "Runs the trained 30-day readmission risk model for a specific "
-                "patient and returns their risk score, percentile, and category "
-                "(low/medium/high). Use this when the user asks about a "
+                "patient and returns their risk category with a plain-language "
+                "interpretation. Use this when the user asks about a "
                 "patient's risk level, whether they need follow-up, or how "
                 "urgent their case is."
             ),
@@ -109,6 +109,13 @@ TOOLS = [
 ]
 
 
+RISK_INTERPRETATION = {
+    "high": "Higher concern after discharge; prioritize timely follow-up, medication reconciliation, and clear return precautions.",
+    "medium": "Some added concern after discharge; arrange timely follow-up and confirm the patient understands the care plan.",
+    "low": "Lower concern based on the model; continue standard discharge instructions and routine follow-up unless clinical concerns arise.",
+}
+
+
 def dispatch_tool_call(name: str, arguments: dict) -> str:
     """
     Executes the actual tool and returns a string result to feed back to
@@ -145,10 +152,10 @@ def dispatch_tool_call(name: str, arguments: dict) -> str:
     if name == "assess_readmission_risk":
         from src.agents.risk_tool import assess_risk
         result = assess_risk(arguments["patient_id"])
+        category = str(result["risk_category"]).lower()
         return (
-            f"Risk category: {result['risk_category']}, "
-            f"percentile: {result['risk_percentile']:.0f}, "
-            f"score: {result['risk_score']:.3f}, "
+            f"Readmission risk: {category}. "
+            f"Plain-language interpretation: {RISK_INTERPRETATION.get(category, 'Review the care plan and discharge context to decide follow-up urgency.')} "
             f"admission reason: {result['admission_reason']}"
         )
 
