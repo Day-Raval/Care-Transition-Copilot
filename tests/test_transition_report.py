@@ -131,8 +131,8 @@ class TransitionReportTest(unittest.TestCase):
 
     def test_patient_queue_exposes_review_filter_flags(self):
         old_state = main._state.copy()
-        old_saved_plan = main.latest_saved_care_plan
-        old_latest_decision = main.latest_decision
+        old_read_care_plans = main.read_care_plans
+        old_read_decisions = main.read_decisions
         try:
             main._state.clear()
             main._state["queue_df"] = pd.DataFrame([
@@ -150,12 +150,16 @@ class TransitionReportTest(unittest.TestCase):
                 },
             ])
             main._state["reference_scores"] = np.array([0.2, 0.9])
-            main.latest_saved_care_plan = lambda patient_id, discharge_ts=None: (
-                {"categories_with_no_match": ["medications"]} if patient_id == "patient-1" else None
-            )
-            main.latest_decision = lambda patient_id, discharge_ts=None: (
-                {"decision": "approved"} if patient_id == "patient-1" else None
-            )
+            main.read_care_plans = lambda limit=10000: [
+                {
+                    "patient_id": "patient-1",
+                    "discharge_ts": "2026-09-24",
+                    "categories_with_no_match": ["medications"],
+                }
+            ]
+            main.read_decisions = lambda limit=10000: [
+                {"patient_id": "patient-1", "discharge_ts": "2026-09-24", "decision": "approved"}
+            ]
 
             first = next(item for item in main._build_patient_queue_items() if item.patient_name == "Jane Example")
             second = next(item for item in main._build_patient_queue_items() if item.patient_name == "Sam Example")
@@ -168,5 +172,5 @@ class TransitionReportTest(unittest.TestCase):
         finally:
             main._state.clear()
             main._state.update(old_state)
-            main.latest_saved_care_plan = old_saved_plan
-            main.latest_decision = old_latest_decision
+            main.read_care_plans = old_read_care_plans
+            main.read_decisions = old_read_decisions

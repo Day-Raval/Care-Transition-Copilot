@@ -779,6 +779,37 @@ def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[st
     return dict(row) if row else None
 
 
+def read_decisions(limit: int = 10000) -> list[dict[str, Any]]:
+    init_decision_db()
+    if use_database():
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT patient_id, discharge_ts, decision, decided_at, actor, draft_plan
+                    FROM care_plan_decisions
+                    ORDER BY decided_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            ).mappings()
+        return [dict(row) for row in rows]
+
+    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT patient_id, discharge_ts, decision, decided_at, actor, draft_plan
+            FROM care_plan_decisions
+            ORDER BY decided_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def runtime_dependency_report(cfg: Config) -> dict[str, Any]:
     target_csv = cfg.output_csv.replace(".csv", "_with_target.csv")
     kafka = kafka_dependency_report()

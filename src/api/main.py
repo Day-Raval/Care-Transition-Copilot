@@ -72,6 +72,7 @@ from src.api.production import (
     notify_care_plan_decision,
     read_audit_events,
     read_care_plans,
+    read_decisions,
     read_fhir_writebacks,
     read_follow_ups,
     read_notifications,
@@ -725,16 +726,25 @@ def search_patient_queue(query: PatientSearchRequest):
 def _build_patient_queue_items(category: str | None = None, search: str = "") -> list[QueueItem]:
     queue_df = _state["queue_df"]
     scores = _state["reference_scores"]
+    percentiles = (pd.Series(scores).rank(method="min").sub(1).div(len(scores)).mul(100).to_numpy())
+    care_plans = {
+        (str(plan.get("patient_id")), str(plan.get("discharge_ts"))): plan
+        for plan in read_care_plans(limit=10000)
+    }
+    decisions = {
+        (str(decision.get("patient_id")), str(decision.get("discharge_ts"))): decision
+        for decision in read_decisions(limit=10000)
+    }
 
     items = []
     for i in range(len(queue_df)):
         patient_id = str(queue_df.iloc[i]["patient_id"])
         discharge_ts = str(queue_df.iloc[i]["discharge_ts"])
         risk_score = float(scores[i])
-        percentile = float((scores < risk_score).mean() * 100)
+        percentile = float(percentiles[i])
         cat = _categorize(percentile)
-        saved_plan = latest_saved_care_plan(patient_id, discharge_ts)
-        decision = latest_decision(patient_id, discharge_ts)
+        saved_plan = care_plans.get((patient_id, discharge_ts))
+        decision = decisions.get((patient_id, discharge_ts))
         items.append(QueueItem(
             patient_ref=_patient_ref(patient_id),
             patient_name=queue_df.iloc[i]["patient_name"],
