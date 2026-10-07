@@ -66,6 +66,10 @@ class QueueItem(BaseModel):
     risk_score: float
     risk_percentile: float
     risk_category: str
+    decision_status: Literal["approved", "rejected"] | None = None
+    needs_review: bool = True
+    missing_evidence: bool = False
+    precomputed: bool = False
 
 
 class PatientSearchRequest(BaseModel):

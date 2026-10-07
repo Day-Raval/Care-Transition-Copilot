@@ -5,8 +5,28 @@ import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
+const QUEUE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "high-risk", label: "High risk" },
+  { key: "needs-review", label: "Needs review" },
+  { key: "approved", label: "Approved" },
+  { key: "rejected", label: "Rejected" },
+  { key: "missing-evidence", label: "Missing evidence" },
+  { key: "precomputed", label: "Precomputed" },
+];
+
+function matchesQueueFilter(patient, filter) {
+  if (filter === "high-risk") return patient.risk_category === "high";
+  if (filter === "needs-review") return patient.needs_review;
+  if (filter === "approved" || filter === "rejected") return patient.decision_status === filter;
+  if (filter === "missing-evidence") return patient.missing_evidence;
+  if (filter === "precomputed") return patient.precomputed;
+  return true;
+}
+
 export default function CarePlans() {
   const [patients, setPatients] = useState([]);
+  const [queueFilter, setQueueFilter] = useState("all");
   const [selected, setSelected] = useState(null);
   const [assessment, setAssessment] = useState(null);
   const [loadingPatients, setLoadingPatients] = useState(true);
@@ -15,6 +35,7 @@ export default function CarePlans() {
   const [precomputing, setPrecomputing] = useState(false);
   const [precomputeStatus, setPrecomputeStatus] = useState(null);
   const isLowRisk = assessment?.risk_category === "low";
+  const visiblePatients = patients.filter((patient) => matchesQueueFilter(patient, queueFilter));
 
   useEffect(() => {
     getQueue(null, 50)
@@ -102,11 +123,28 @@ export default function CarePlans() {
         </div>
 
         {loadingPatients && <LoadingState>Loading patients...</LoadingState>}
+        {!loadingPatients && patients.length > 0 && (
+          <div className="queue-filters">
+            {QUEUE_FILTERS.map((filter) => (
+              <button
+                className={`queue-filter-chip ${queueFilter === filter.key ? "active" : ""}`}
+                key={filter.key}
+                type="button"
+                onClick={() => setQueueFilter(filter.key)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        )}
         {!loadingPatients && patients.length === 0 && (
           <EmptyState>No patients available for care-plan generation.</EmptyState>
         )}
+        {!loadingPatients && patients.length > 0 && visiblePatients.length === 0 && (
+          <EmptyState>No patients match this queue filter.</EmptyState>
+        )}
         <div className="queue-list">
-          {patients.map((patient) => (
+          {visiblePatients.map((patient) => (
             <div
               key={`${patient.patient_ref}-${patient.discharge_ts}`}
               className={`queue-card ${selected?.patient_ref === patient.patient_ref ? "selected" : ""}`}
@@ -119,6 +157,11 @@ export default function CarePlans() {
               <div className={`score-badge ${patient.risk_category}`}>
                 <span>{patient.risk_percentile.toFixed(1)}</span>
                 <small>pct</small>
+              </div>
+              <div className="queue-card-tags">
+                {patient.decision_status && <span className={`pill ${patient.decision_status === "approved" ? "pill-ok" : "pill-warn"}`}>{patient.decision_status}</span>}
+                {patient.precomputed && <span className="pill pill-neutral">precomputed</span>}
+                {patient.missing_evidence && <span className="pill pill-warn">missing evidence</span>}
               </div>
             </div>
           ))}

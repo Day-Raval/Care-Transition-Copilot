@@ -3,6 +3,9 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+import pandas as pd
+
 from src.api import main
 from src.api import production
 from src.api.production import build_transition_report, record_fhir_writeback, save_transition_report
@@ -125,3 +128,45 @@ class TransitionReportTest(unittest.TestCase):
             main._latest_discharge_ts = old_latest_discharge_ts
             main.latest_decision = old_latest_decision
             main.latest_follow_up = old_latest_follow_up
+
+    def test_patient_queue_exposes_review_filter_flags(self):
+        old_state = main._state.copy()
+        old_saved_plan = main.latest_saved_care_plan
+        old_latest_decision = main.latest_decision
+        try:
+            main._state.clear()
+            main._state["queue_df"] = pd.DataFrame([
+                {
+                    "patient_id": "patient-1",
+                    "patient_name": "Jane Example",
+                    "discharge_ts": "2026-09-24",
+                    "admission_reason": "Heart failure",
+                },
+                {
+                    "patient_id": "patient-2",
+                    "patient_name": "Sam Example",
+                    "discharge_ts": "2026-09-25",
+                    "admission_reason": "Pneumonia",
+                },
+            ])
+            main._state["reference_scores"] = np.array([0.2, 0.9])
+            main.latest_saved_care_plan = lambda patient_id, discharge_ts=None: (
+                {"categories_with_no_match": ["medications"]} if patient_id == "patient-1" else None
+            )
+            main.latest_decision = lambda patient_id, discharge_ts=None: (
+                {"decision": "approved"} if patient_id == "patient-1" else None
+            )
+
+            first = next(item for item in main._build_patient_queue_items() if item.patient_name == "Jane Example")
+            second = next(item for item in main._build_patient_queue_items() if item.patient_name == "Sam Example")
+
+            self.assertEqual(first.decision_status, "approved")
+            self.assertTrue(first.precomputed)
+            self.assertTrue(first.missing_evidence)
+            self.assertFalse(first.needs_review)
+            self.assertTrue(second.needs_review)
+        finally:
+            main._state.clear()
+            main._state.update(old_state)
+            main.latest_saved_care_plan = old_saved_plan
+            main.latest_decision = old_latest_decision

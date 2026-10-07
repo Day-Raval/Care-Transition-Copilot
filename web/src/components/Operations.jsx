@@ -7,6 +7,7 @@ import {
   getHealth,
   getModelInfo,
   getNotifications,
+  getPrecomputeStatus,
   getReminders,
 } from "../api.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
@@ -47,13 +48,23 @@ function CheckList({ checks }) {
   );
 }
 
+function StatusCard({ title, status, detail }) {
+  return (
+    <div className="ops-status-card">
+      <div className="event-title">{title}</div>
+      <div className="event-meta">{status}</div>
+      {detail && <div className="event-meta">{detail}</div>}
+    </div>
+  );
+}
+
 export default function Operations() {
   const [events, setEvents] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [writebacks, setWritebacks] = useState([]);
   const [followUps, setFollowUps] = useState([]);
   const [reminders, setReminders] = useState([]);
-  const [system, setSystem] = useState({ health: null, model: null, drift: null, errors: [] });
+  const [system, setSystem] = useState({ health: null, model: null, drift: null, precompute: null, errors: [] });
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,8 +81,9 @@ export default function Operations() {
       getHealth(),
       getModelInfo(),
       getDriftReport(),
+      getPrecomputeStatus(),
     ])
-      .then(([auditResult, notificationResult, writebackResult, followUpResult, reminderResult, healthResult, modelResult, driftResult]) => {
+      .then(([auditResult, notificationResult, writebackResult, followUpResult, reminderResult, healthResult, modelResult, driftResult, precomputeResult]) => {
         setEvents(resultValue(auditResult, []));
         setNotifications(resultValue(notificationResult, []));
         setWritebacks(resultValue(writebackResult, []));
@@ -81,7 +93,8 @@ export default function Operations() {
           health: resultValue(healthResult),
           model: resultValue(modelResult),
           drift: resultValue(driftResult),
-          errors: [healthResult, modelResult, driftResult].map(resultError).filter(Boolean),
+          precompute: resultValue(precomputeResult),
+          errors: [healthResult, modelResult, driftResult, precomputeResult].map(resultError).filter(Boolean),
         });
         const primaryError = resultError(auditResult)
           || resultError(notificationResult)
@@ -155,8 +168,31 @@ export default function Operations() {
               <div className={`decision-badge ${system.health.status === "ok" ? "approved" : "rejected"}`}>
                 API {system.health.status}
               </div>
+              <div className="ops-status-grid">
+                <StatusCard
+                  title="Kafka dependency"
+                  status={system.health.dependencies?.kafka?.ready ? "ready" : "not ready"}
+                  detail={system.health.dependencies?.kafka?.mode || system.health.kafka_consumer?.status}
+                />
+                <StatusCard
+                  title="Kafka consumer"
+                  status={system.health.kafka_consumer?.status || "unknown"}
+                  detail={system.health.kafka_consumer?.topic || ""}
+                />
+                <StatusCard
+                  title="Notifications"
+                  status={system.health.dependencies?.notifications?.ready ? "ready" : "not ready"}
+                  detail={system.health.dependencies?.notifications?.channel || system.health.dependencies?.notifications?.mode}
+                />
+                {system.precompute && (
+                  <StatusCard
+                    title="Precompute"
+                    status={system.precompute.status}
+                    detail={`${system.precompute.completed} completed, ${system.precompute.skipped} skipped, ${system.precompute.failed} failed`}
+                  />
+                )}
+              </div>
               <CheckList checks={system.health.dependencies?.checks} />
-              <div className="event-meta">Kafka: {system.health.kafka_consumer?.status || "unknown"}</div>
             </>
           )}
           {!loading && system.model && (
@@ -165,6 +201,7 @@ export default function Operations() {
               <div className="event-meta">
                 {system.model.training_events} training events | {system.model.fairness_status}
               </div>
+              <div className="event-meta">{system.model.features?.length || 0} model features</div>
             </div>
           )}
           {!loading && system.drift && (

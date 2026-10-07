@@ -728,17 +728,25 @@ def _build_patient_queue_items(category: str | None = None, search: str = "") ->
 
     items = []
     for i in range(len(queue_df)):
+        patient_id = str(queue_df.iloc[i]["patient_id"])
+        discharge_ts = str(queue_df.iloc[i]["discharge_ts"])
         risk_score = float(scores[i])
         percentile = float((scores < risk_score).mean() * 100)
         cat = _categorize(percentile)
+        saved_plan = latest_saved_care_plan(patient_id, discharge_ts)
+        decision = latest_decision(patient_id, discharge_ts)
         items.append(QueueItem(
-            patient_ref=_patient_ref(str(queue_df.iloc[i]["patient_id"])),
+            patient_ref=_patient_ref(patient_id),
             patient_name=queue_df.iloc[i]["patient_name"],
-            discharge_ts=str(queue_df.iloc[i]["discharge_ts"]),
+            discharge_ts=discharge_ts,
             admission_reason=str(queue_df.iloc[i]["admission_reason"]),
             risk_score=round(risk_score, 4),
             risk_percentile=round(percentile, 1),
             risk_category=cat,
+            decision_status=decision["decision"] if decision else None,
+            needs_review=decision is None,
+            missing_evidence=bool(saved_plan and saved_plan.get("categories_with_no_match")),
+            precomputed=saved_plan is not None,
         ))
 
     if category:
