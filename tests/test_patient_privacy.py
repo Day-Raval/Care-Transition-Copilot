@@ -88,6 +88,25 @@ class PatientPrivacyTest(unittest.TestCase):
         self.assertIn("do not search by surname again", prompt)
         self.assertIn("Summarize meds", prompt)
 
+    def test_chat_fast_path_answers_readmission_risk_without_llm(self):
+        with (
+            patch("src.agents.chat_agent.ask") as ask,
+            patch("src.agents.risk_tool.assess_risk", return_value={
+                "risk_category": "high",
+                "risk_percentile": 91.0,
+                "risk_score": 1.5,
+                "admission_reason": "Heart failure",
+            }),
+            patch.object(main, "log_audit_event"),
+        ):
+            response = main.chat(main.ChatRequest(question="Review readmission risk", patient_name="Jane Example"))
+
+        ask.assert_not_called()
+        self.assertIn("higher concern after discharge", response.answer.lower())
+        self.assertIn("Heart failure", response.answer)
+        self.assertNotIn("percentile", response.answer.lower())
+        self.assertNotIn("91", response.answer)
+
     def test_chat_request_rejects_patient_ref_field(self):
         with self.assertRaises(ValueError):
             main.ChatRequest.model_validate({"question": "Summarize meds", "patient_ref": main._patient_ref("patient-1")})

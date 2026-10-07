@@ -40,7 +40,7 @@ If the user asks a general clinical or workflow question that does not need a sp
 
 If the user refers to a patient by name, call find_patient_by_name FIRST to resolve it internally before calling any other tool. If the user message says the patient has already been resolved to an internal patient_id, do not call find_patient_by_name again; use that patient_id for tools. If name lookup returns multiple matches, give a brief general answer to the user's question first, then ask which patient they mean by name or non-identifying context rather than asking for an ID.
 
-For open-ended questions about a patient's overall situation, whether concern is warranted, or anything requiring a full picture: ALWAYS call BOTH assess_readmission_risk AND search_patient_chart. Risk score alone doesn't tell you what's documented, and chart content alone doesn't tell you the model's actual risk assessment — a "should I be worried" answer built on only one of the two is incomplete and can be misleading. When searching the chart for such questions, call search_patient_chart MULTIPLE times with different specific queries (e.g. once for medications, once for comorbidities, once for procedures) rather than once with a vague query.
+For open-ended questions about a patient's overall situation, whether concern is warranted, or anything requiring a full picture: call assess_readmission_risk and one targeted search_patient_chart query. Add a second chart search only if the first result is not enough to answer the user's actual question.
 
 When you do use tool results, ground your answer in exactly what the tools returned. If a tool genuinely returns "no relevant documentation found" after a well-targeted query, say that plainly rather than guessing. If you're asked something the tools can't answer, say so rather than speculating.
 
@@ -48,7 +48,7 @@ When discussing readmission risk in chat, do not mention numeric percentiles or 
 
 Never ask the user for patient_id or patient_ref values. Never include patient_id or patient_ref values in the final answer. Refer to the patient by name or as "this patient" instead.
 
-Format the final answer as a clean documented note, not a raw dump. Use short section labels such as "Answer", "Evidence", "Gaps", and "Next steps" when they fit the question. Use hyphen bullets for lists, avoid decorative asterisks, and keep paragraphs concise."""
+Format the final answer as a concise clinical note, not a raw dump. For simple questions, answer directly without section headings. Use headings like "Evidence" or "Gaps" only when the user asks for source detail or when missing documentation materially changes the answer. Use hyphen bullets for lists, avoid decorative asterisks, and keep paragraphs concise."""
 def ask(question: str) -> dict:
     """
     Runs the tool-calling loop. Returns {"answer": str, "tool_calls": [...]}

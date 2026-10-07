@@ -419,6 +419,40 @@ def _resolve_patient_name(name: str) -> dict[str, str] | None:
     return {"patient_id": str(row.patient_id), "patient_name": str(row.patient_name)}
 
 
+def _chat_fast_path(question: str, resolved_patient: dict[str, str] | None) -> dict[str, Any] | None:
+    if not resolved_patient:
+        return None
+    normalized = re.sub(r"[^a-z ]", " ", question.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if normalized not in {"review readmission risk", "readmission risk", "risk"}:
+        return None
+
+    from src.agents.risk_tool import assess_risk
+    from src.agents.tools import RISK_INTERPRETATION
+
+    result = assess_risk(resolved_patient["patient_id"])
+    category = str(result["risk_category"]).lower()
+    interpretation = RISK_INTERPRETATION.get(
+        category,
+        "Review the care plan and discharge context to decide follow-up urgency.",
+    )
+    tool_result = (
+        f"Readmission risk: {category}. "
+        f"Plain-language interpretation: {interpretation} "
+        f"admission reason: {result['admission_reason']}"
+    )
+    return {
+        "answer": f"This patient is {category} risk. {interpretation} Admission reason: {result['admission_reason']}.",
+        "tool_calls": [
+            {
+                "name": "assess_readmission_risk",
+                "arguments": {"patient_id": resolved_patient["patient_id"]},
+                "result": tool_result,
+            }
+        ],
+    }
+
+
 def _redact_chat_payload(payload: dict[str, Any]) -> dict[str, Any]:
     redacted = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     redacted["answer"] = _mask_patient_ids(str(redacted.get("answer", "")))
@@ -1101,6 +1135,7 @@ def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail=PATIENT_ID_GUARDRAIL)
 
     question = request.question
+    resolved = None
     if request.patient_name:
         resolved = _resolve_patient_name(request.patient_name)
         if resolved:
@@ -1113,7 +1148,7 @@ def chat(request: ChatRequest):
             question = f"For patient {request.patient_name}, {question}"
 
     try:
-        result = ask(question)
+        result = _chat_fast_path(request.question, resolved) or ask(question)
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
