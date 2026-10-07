@@ -62,73 +62,165 @@ production monitoring, and real EHR integration are still planned work.
 
 ```mermaid
 flowchart TB
-    subgraph Pipeline["Care transition workflow"]
-        direction LR
-
-        subgraph Intake["Data intake"]
-            direction TB
-            ehr["Hospital EHR<br/>Discharge event"]
-            adapter["FHIR / HL7v2 adapter<br/>Normalize records"]
-            kafka["Kafka event bus<br/>Episode stream"]
-            ehr --> adapter --> kafka
-        end
-
-        subgraph Data["Clinical data plane"]
-            direction TB
-            postgres["Postgres<br/>Episodes, features, audit IDs"]
-            chroma["ChromaDB<br/>Notes and discharge text"]
-            features["Feature store<br/>Readmission predictors"]
-            postgres --- chroma
-            postgres --- features
-        end
-
-        subgraph Decision["Decision services"]
-            direction TB
-            model["Risk model API<br/>Cox / hazard model"]
-            explain["Explanation service<br/>SHAP + subgroup checks"]
-            agents["Agent orchestrator<br/>Retrieve, draft, critique"]
-            model --> explain --> agents
-        end
-
-        subgraph Delivery["Care delivery"]
-            direction TB
-            clinician["Clinician UI<br/>Review and sign off"]
-            fhir["FHIR write-back<br/>Approved plan only"]
-            notify["Notifications<br/>Portal / reminder"]
-            clinician -->|Approved| fhir --> notify
-        end
+    subgraph External["External systems and users"]
+        direction TB
+        clinician["Clinician or care coordinator"]
+        idp["OIDC identity provider<br/>JWKS, issuer, audience, roles"]
+        ehr["Hospital EHR<br/>FHIR bundle or HL7v2 ADT^A03"]
+        groq["Groq LLM gateway<br/>reasoning, critique, chat tools"]
+        sms["Twilio SMS<br/>optional notification channel"]
     end
 
-    kafka --> postgres
-    kafka --> chroma
-    kafka --> features
-    features --> model
-    chroma --> agents
-    postgres --> agents
-    agents --> clinician
-    notify -. Outcomes and completion status .-> postgres
-    clinician -. Edit or reject .-> agents
-
-    subgraph Controls["Production controls"]
-        direction LR
-        security["Access and audit<br/>OAuth2 / RBAC | Audit logging"]
-        operations["Reliability and delivery<br/>Retries | Circuit breakers | CI/CD"]
-        quality["Observability and quality<br/>Prometheus / Grafana | Drift monitoring"]
+    subgraph Client["Browser client - React/Vite"]
+        direction TB
+        ui["Clinician UI<br/>Risk queue, Patients, Care plans, Chat, Operations"]
+        oidcClient["OIDC client<br/>login, logout, bearer token"]
+        apiClient["API client<br/>X-API-Key or Authorization header<br/>request timeout + X-Request-ID"]
+        ui --> oidcClient
+        ui --> apiClient
     end
 
-    Controls -. Applies across every layer .-> Pipeline
+    subgraph Api["FastAPI application boundary"]
+        direction TB
+        middleware["Security and request middleware<br/>API key or OIDC verification<br/>role checks, CORS, safe errors"]
+        patientApi["Patient workflow APIs<br/>/patients, /assessment, /decision<br/>/report, /follow-up, /reminders"]
+        chatApi["Chat API<br/>patient-name resolution<br/>patient-ID guardrail and redaction"]
+        modelApi["Model APIs<br/>/predict, /model-info, /drift-report"]
+        intakeApi["Intake APIs<br/>/intake/hl7-adt<br/>/intake/discharge-event"]
+        opsApi["Operations APIs<br/>/health, /audit-events<br/>/notifications, /fhir-writebacks<br/>/care-plans, /tasks/precompute"]
+        middleware --> patientApi
+        middleware --> chatApi
+        middleware --> modelApi
+        middleware --> intakeApi
+        middleware --> opsApi
+    end
 
-    classDef intake fill:#e8f5f3,stroke:#147c78,color:#10213f,stroke-width:2px;
-    classDef data fill:#eef4ff,stroke:#466eb6,color:#10213f,stroke-width:2px;
-    classDef decision fill:#e8f5f3,stroke:#147c78,color:#10213f,stroke-width:2px;
-    classDef delivery fill:#fff5df,stroke:#a66a16,color:#10213f,stroke-width:2px;
-    classDef control fill:#f3f6fb,stroke:#526174,color:#10213f,stroke-width:1px;
+    subgraph Decisioning["Decisioning and AI services"]
+        direction TB
+        riskModel["Cox risk model service<br/>loaded model artifact + feature schema<br/>risk score, percentile, category"]
+        riskTool["Risk tool<br/>looks up episode features<br/>calls live /predict"]
+        retrieval["Retrieval layer<br/>patient-scoped Chroma queries<br/>distance threshold + diversity filter"]
+        orchestrator["LangGraph orchestrator<br/>risk gate: low-risk summary<br/>medium/high-risk retrieve -> draft -> critique"]
+        reasoning["Reasoning agent<br/>draft care-transition plan"]
+        critique["Critique agent<br/>hallucination and overreach check"]
+        chatAgent["Tool-calling chat agent<br/>risk and chart-search tools<br/>fast paths for risk or meds"]
+        precompute["Precompute manager<br/>startup, intake, API task, or script<br/>deduplicates in-flight LLM work"]
+        riskModel --> riskTool
+        riskTool --> orchestrator
+        retrieval --> orchestrator
+        orchestrator --> reasoning --> critique
+        chatAgent --> riskTool
+        chatAgent --> retrieval
+        precompute --> orchestrator
+    end
 
-    class ehr,adapter,kafka intake;
-    class postgres,chroma,features data;
-    class model,explain,agents decision;
-    class clinician,fhir,notify delivery;
-    class security,operations,quality control;
+    subgraph DataPlane["Clinical data and persistence"]
+        direction TB
+        rawFhir["Synthetic FHIR bundles<br/>data/samples and Synthea output"]
+        processed["Processed records<br/>discharge CSV, targets, note JSONL"]
+        modelArtifact["Saved model artifacts<br/>models/*.joblib"]
+        chroma["ChromaDB vector store<br/>data/processed/chroma_db"]
+        redis["Redis cache<br/>optional assessment cache"]
+        localResults["Local result files<br/>audit, care plans, notifications<br/>FHIR stubs, follow-ups, reminders"]
+        sqlite["SQLite stores<br/>decisions and idempotency"]
+        postgres["Postgres / SQLAlchemy<br/>optional persistence backend<br/>migrated episodes, decisions, logs"]
+        reports["Markdown reports<br/>reports/care-transition-report__*.md"]
+        rawFhir --> processed
+        processed --> chroma
+        processed --> riskModel
+        modelArtifact --> riskModel
+    end
+
+    subgraph EventPlane["Event streaming and background processing"]
+        direction TB
+        producer["Kafka producers<br/>discharge episodes + audit events"]
+        kafka["Kafka topics<br/>discharge episodes, audit events, DLQ"]
+        consumer["Persistent Kafka consumer<br/>worker pool, backpressure<br/>retry, idempotency, DLQ routing"]
+        idempotency["Idempotency store<br/>SQLite by default"]
+        producer --> kafka --> consumer
+        consumer --> idempotency
+        consumer --> precompute
+    end
+
+    subgraph Delivery["Care delivery side effects"]
+        direction TB
+        decision["Clinician decision<br/>approve, reject, edited draft"]
+        report["Approved report<br/>preview, copy, download"]
+        fhirStub["Local FHIR CarePlan stub<br/>approved plan only"]
+        notify["Patient notification record<br/>portal stub or Twilio SMS"]
+        followUp["Follow-up status<br/>pending to completed/readmitted"]
+        reminder["Scheduled reminder<br/>requires approved plan + follow-up"]
+        decision --> report
+        decision --> fhirStub
+        decision --> notify
+        report --> followUp --> reminder
+    end
+
+    subgraph Ops["Production controls and observability"]
+        direction TB
+        health["Dependency-aware health<br/>model, data, Kafka, Redis, notifications"]
+        audit["Audit trail<br/>actor, request id, patient ref, event type"]
+        drift["Drift monitoring<br/>prediction log vs training reference"]
+        privacy["Privacy boundary<br/>patient_ref in browser<br/>raw patient_id stays server-side"]
+        roles["RBAC policy<br/>care_coordinator, clinician<br/>data_scientist, admin"]
+    end
+
+    clinician --> ui
+    idp --> oidcClient
+    apiClient --> middleware
+    ehr --> intakeApi
+    intakeApi --> processed
+    intakeApi --> producer
+    intakeApi --> precompute
+    patientApi --> orchestrator
+    patientApi --> decision
+    patientApi --> redis
+    chatApi --> chatAgent
+    modelApi --> riskModel
+    opsApi --> health
+    opsApi --> audit
+    opsApi --> drift
+    groq --> reasoning
+    groq --> critique
+    groq --> chatAgent
+    sms --> notify
+    orchestrator --> localResults
+    decision --> localResults
+    decision --> sqlite
+    decision --> postgres
+    report --> reports
+    fhirStub --> localResults
+    notify --> localResults
+    followUp --> localResults
+    reminder --> localResults
+    producer --> localResults
+    audit --> localResults
+    drift --> localResults
+    health -. checks .-> redis
+    health -. checks .-> kafka
+    health -. checks .-> postgres
+    health -. checks .-> groq
+    roles -. enforced by .-> middleware
+    privacy -. enforced by .-> middleware
+    localResults -. database mode routes to .-> postgres
+
+    classDef external fill:#fff7ed,stroke:#c2410c,color:#1f2937,stroke-width:1px;
+    classDef client fill:#eff6ff,stroke:#2563eb,color:#1f2937,stroke-width:1px;
+    classDef api fill:#ecfdf5,stroke:#059669,color:#1f2937,stroke-width:2px;
+    classDef ai fill:#f5f3ff,stroke:#7c3aed,color:#1f2937,stroke-width:1px;
+    classDef data fill:#f8fafc,stroke:#475569,color:#1f2937,stroke-width:1px;
+    classDef event fill:#fefce8,stroke:#a16207,color:#1f2937,stroke-width:1px;
+    classDef delivery fill:#fdf2f8,stroke:#be185d,color:#1f2937,stroke-width:1px;
+    classDef ops fill:#f1f5f9,stroke:#334155,color:#1f2937,stroke-width:1px,stroke-dasharray:4 3;
+
+    class clinician,idp,ehr,groq,sms external;
+    class ui,oidcClient,apiClient client;
+    class middleware,patientApi,chatApi,modelApi,intakeApi,opsApi api;
+    class riskModel,riskTool,retrieval,orchestrator,reasoning,critique,chatAgent,precompute ai;
+    class rawFhir,processed,modelArtifact,chroma,redis,localResults,sqlite,postgres,reports data;
+    class producer,kafka,consumer,idempotency event;
+    class decision,report,fhirStub,notify,followUp,reminder delivery;
+    class health,audit,drift,privacy,roles ops;
 ```
 
 - **Implemented data path** - synthetic FHIR bundles are parsed into canonical
