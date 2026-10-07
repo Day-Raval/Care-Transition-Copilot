@@ -4,7 +4,7 @@
 
 Phase 1 (synthetic data → risk model → fairness check) is complete.
 Everything below is backed by an actual run you can reproduce, not a
-plan — every number here came from `results/experiments.csv` or a
+plan — every number here came from `results/modeling/experiments.csv` or a
 script in `src/model/`.
 
 ---
@@ -79,7 +79,7 @@ small samples rather than finding real extra signal.
 
 ### Experiment tracking
 
-Every training run is logged to `results/experiments.csv` (features,
+Every training run is logged to `results/modeling/experiments.csv` (features,
 hyperparameters, split sizes, C-index) with the model file saved
 alongside it in `models/{run_id}.joblib` — see
 `src/model/run_experiment.py` and `src/model/compare_experiments.py`.
@@ -120,11 +120,16 @@ comparison becomes possible at the current ~2% event rate.
 |---|---|
 | `config.yaml` | All tunable pipeline parameters (population size, episode gap threshold, medication lookback, readmission horizon) |
 | `data/processed/discharge_records_with_target.csv` | The modeling dataset — one row per episode, with the final target columns |
-| `results/experiments.csv` | Every logged training run, comparable side by side |
+| `results/modeling/experiments.csv` | Every logged training run, comparable side by side |
 | `models/*.joblib` | Saved model files, one per logged run (gitignored — regenerable) |
-| `results/decisions.sqlite3` | Local approve/reject decisions for generated care plans (gitignored) |
-| `results/care_plans.jsonl` / `results/audit_log.jsonl` | Local saved care-plan and audit-event logs; database mode routes these records to SQL tables instead |
-| `results/fairness_audit_*.txt` | Timestamped fairness audit reports |
+| `results/care_delivery/decisions.sqlite3` | Local approve/reject decisions for generated care plans (gitignored) |
+| `results/care_delivery/care_plans.jsonl` | Local saved generated care plans; database mode routes these records to SQL tables instead |
+| `results/care_delivery/notifications.jsonl` | Local notification outcomes for approved care plans |
+| `results/care_delivery/fhir_writebacks.jsonl` | Local FHIR write-back stubs recorded after approval |
+| `results/care_delivery/follow_ups.jsonl` | Local follow-up status records for approved plans |
+| `results/care_delivery/reminders.jsonl` | Local scheduled reminder records |
+| `results/operations/audit_log.jsonl` | Local API audit events; database mode routes these records to SQL tables instead |
+| `results/modeling/fairness_audits/` | Timestamped fairness audit reports |
 
 ---
 
@@ -394,9 +399,10 @@ gaps that were previously obvious in local testing.
   query parameter, so repeat patients are not collapsed to patient ID alone.
 - Added an assessment cache controlled by `CACHE_TTL_SECONDS` to avoid
   regenerating the same LLM-backed assessment on every dashboard click.
-- Added file-based audit logging to `results/audit_log.jsonl`.
-- Added file-based saved care plans to `results/care_plans.jsonl`.
-- Added SQLite-backed care-plan decision storage in `results/decisions.sqlite3`.
+- Added file-based audit logging to `results/operations/audit_log.jsonl`.
+- Added file-based saved care plans to `results/care_delivery/care_plans.jsonl`.
+- Added SQLite-backed care-plan decision storage in
+  `results/care_delivery/decisions.sqlite3`.
 - Added optional SQL-backed persistence for decisions, saved care plans, and
   audit events when `PERSISTENCE_BACKEND=database` and `DATABASE_URL` are set.
 - Added request tracing with `X-Request-ID`, echoed by the API and shown in web
@@ -410,7 +416,16 @@ gaps that were previously obvious in local testing.
   `GET /patients/{patient_id}/report`. Approved reports are saved under
   `reports/` using public demo filenames such as
   `care-transition-report__2026-08-09__994d6249.md`; rejected drafts return an
-  edit-required status instead of a finalized report.
+  edit-required status instead of a finalized report. The dashboard now lets a
+  reviewer copy or download the approved Markdown report.
+- Added local FHIR write-back stubs for approved decisions. Approval records a
+  local FHIR `CarePlan` handoff so the Operations view can show what would be
+  written back before a real EHR integration exists.
+- Added follow-up and reminder APIs for the post-approval workflow:
+  `GET`/`POST /patients/{patient_ref}/follow-up`,
+  `POST /patients/{patient_ref}/reminders`, `GET /follow-ups`, and
+  `GET /reminders`. Follow-up status requires an approved plan, and reminder
+  scheduling requires a recorded follow-up status.
 
 ### Runtime controls (`src/utils/runtime.py`, agent modules)
 - Added configurable timeouts for Groq calls via `LLM_TIMEOUT_SECONDS`.
@@ -424,6 +439,15 @@ gaps that were previously obvious in local testing.
 - Added a Patients table backed by the existing `/patients` API.
 - Added a Care plans page that selects a patient and generates/views the draft
   follow-up plan.
+- Added queue filters for high-risk, needs-review, approved, rejected,
+  missing-evidence, and precomputed care-plan cases.
+- Added report copy/download actions, follow-up status controls, and reminder
+  scheduling to the approved-plan dashboard flow.
+- Added Operations status cards for Kafka, notifications, and precompute
+  progress, plus FHIR write-backs, follow-ups, reminders, notifications, audit
+  events, model metadata, and drift status.
+- Cleaned patient history display so repeated chart items are collapsed and
+  synthetic numeric name suffixes are replaced with the displayed patient name.
 - Added frontend request timeout handling via `VITE_REQUEST_TIMEOUT_MS` and
   API-key header support via `VITE_API_KEY`.
 - Added reusable loading/error/empty states for web pages.
@@ -440,6 +464,10 @@ gaps that were previously obvious in local testing.
 - The plan's third section is now branded as **Additional review notes** rather
   than "Documentation gaps" or "Chart information not found."
 - Raw "no relevant documentation found" lines are suppressed in the UI.
+- Chat now blocks raw patient IDs, resolves selected patient names internally,
+  keeps risk answers in plain language, and uses audited fast paths for simple
+  readmission-risk or medication questions. Medication answers are grounded in
+  patient-scoped chart retrieval instead of relying on generic model prose.
 
 ## Latest UI Validation - Patient Evidence Panel
 
@@ -493,7 +521,7 @@ treated as one undifferentiated case in the review flow.
 | Assessment cache | Generated assessments are cached per patient episode for `CACHE_TTL_SECONDS`; set to `0` to disable |
 | Episode-specific assessment | `/patients/{patient_id}/assessment` accepts `discharge_ts` |
 | Decision read/write | `/patients/{patient_id}/decision` supports latest-decision lookup and approve/reject writes |
-| Decision persistence | Decisions are stored locally in `results/decisions.sqlite3` with patient ID, discharge timestamp, decision, decided time, actor, and draft plan |
+| Decision persistence | Decisions are stored locally in `results/care_delivery/decisions.sqlite3` with patient ID, discharge timestamp, decision, decided time, actor, and draft plan |
 | Decision idempotency | Repeated approve/reject writes update the same episode decision instead of inserting duplicates |
 | Report export | Approved decisions generate Markdown care-transition reports in `reports/`; rejected decisions show edit-required status |
 | Dashboard actions | Approve and Reject are active buttons; saved decisions render as status badges with actor labels and report preview/status |
@@ -507,7 +535,7 @@ marked for edit and resubmission, but the current backend stores only final
 **Status: Optional SQL persistence path added and covered by tests.**
 
 The local MVP still defaults to JSONL audit/care-plan logs plus
-`results/decisions.sqlite3`, but persistence can now be switched to a SQL
+`results/care_delivery/decisions.sqlite3`, but persistence can now be switched to a SQL
 database by setting `PERSISTENCE_BACKEND=database` and `DATABASE_URL`. The same
 API functions write decision records, saved care plans, and audit events in
 either mode, so the web/API layer does not need a separate code path.
@@ -555,6 +583,36 @@ This is still not full clinical production readiness. It proves the app boundary
 can enforce identity and roles, but deployment-specific identity-provider setup,
 managed secrets, monitoring, and incident operations remain future work.
 
+## Latest Care-Delivery Workflow Update - Reports, Follow-ups, Reminders, and Chat Grounding
+
+**Status: Post-approval workflow is now visible and persisted for the local MVP.**
+
+The latest commits did not change the survival-model result. They closed gaps in
+the clinician workflow after approval and tightened the ad hoc chat surface.
+
+### What was added
+
+| Addition | Current behavior |
+|---|---|
+| Report actions | Approved Markdown reports can be previewed, copied, or downloaded from the dashboard |
+| FHIR write-back stub | Approving a plan records a local FHIR `CarePlan` handoff in `results/care_delivery/fhir_writebacks.jsonl` |
+| Follow-up status | Approved plans can be marked `pending`, `scheduled`, `contacted`, `completed`, `missed`, or `readmitted` |
+| Reminder scheduling | A reminder can be scheduled after a follow-up status exists; records are stored in `results/care_delivery/reminders.jsonl` |
+| Operations view | Shows runtime status cards plus audit events, notifications, FHIR write-backs, follow-ups, reminders, model metadata, and drift |
+| Care-plan filters | The Care plans page can filter high-risk, needs-review, approved, rejected, missing-evidence, and precomputed cases |
+| Patient history formatting | Repeated retrieved chart items collapse into counted bullets, and display names stay clean |
+| Chat grounding | Simple risk and medication questions use audited fast paths; risk is plain language and medication answers come from patient-scoped retrieval |
+| Privacy guardrails | Chat rejects raw patient IDs and redacts patient identifiers from tool-call payloads and answers |
+
+### Validation added
+
+| Test file | Coverage |
+|---|---|
+| `tests/test_transition_report.py` | Report status/actions, follow-up gating, reminder validation, FHIR write-back records, queue status flags |
+| `tests/test_notifications.py` | Notification and FHIR handoff records after approval |
+| `tests/test_patient_privacy.py` | Patient-ref privacy and chat identifier redaction |
+| `tests/test_chat_tools.py` | Plain-language risk interpretation and validated chart-search guidance |
+
 ## Next steps
 
 1. ~~Wrap the chosen model in a FastAPI service~~ — **Done.**
@@ -580,11 +638,14 @@ managed secrets, monitoring, and incident operations remain future work.
    — **Done.** Validated against live assessment payloads and real discharge-note
    excerpts.
 11. ~~Wire clinician approve/reject actions to real backend state~~ — **Done.**
-   Edit remains open.
+   Edited draft approval, report preview, follow-up status, and reminder
+   scheduling are now wired for the local MVP.
 12. ~~Add a database-backed persistence path for decisions, saved care plans,
    and audit events~~ - **Done.** Managed deployment hardening is still open.
 13. ~~Add true authentication/RBAC~~ - **First pass done.** OIDC bearer-token
    verification and role checks are implemented; production identity-provider
    setup and operations hardening remain open.
-14. Next up: add FHIR write-back/notification stubs and harden managed
-   deployment operations.
+14. ~~Add local FHIR write-back/notification stubs~~ - **Done.** Approval records
+   notification and FHIR handoff artifacts locally.
+15. Next up: replace local FHIR/reminder stubs with real integrations and
+   harden managed deployment operations.

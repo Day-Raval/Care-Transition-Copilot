@@ -56,8 +56,9 @@ episode-specific assessments cached in memory or Redis, configurable
 local-or-database persistence, Postgres migration/verification scripts, saved
 draft care-plan records, approve/reject decisions, real-time HL7/structured
 discharge intake, Kafka producers, and a persistent Kafka consumer with DLQ and
-idempotency handling. Full EHR write-back, managed deployments, and production
-monitoring are still planned work.
+idempotency handling. Approved plans now also record local FHIR write-back
+stubs, follow-up statuses, and scheduled reminder records. Managed deployments,
+production monitoring, and real EHR integration are still planned work.
 
 ```mermaid
 flowchart TB
@@ -158,24 +159,26 @@ flowchart TB
 - **Implemented review surface** - the React web app now includes a risk queue,
   Patients view, Care plans view, ad hoc chat interface, and dashboard
   approve/reject actions persisted through the API. Approved plans can generate
-  mock care-transition reports, while rejected plans remain marked for edit and
+  mock care-transition reports with copy/download actions, record follow-up
+  statuses, and schedule reminders. Rejected plans remain marked for edit and
   resubmission.
 - **Implemented production safeguards** - the API has safe error handling,
   health dependency reporting, required API-key protection for local demo mode,
   OIDC bearer-token verification with role checks for user access, request
   timeouts, cached assessment generation with optional Redis backing,
   file-based or SQL-backed audit/care-plan persistence, request tracing,
-  idempotent care-plan decisions, actor tracking for clinician actions,
-  Kafka consumer idempotency, and dead-letter routing for malformed or failed
-  stream messages.
+  idempotent care-plan decisions, actor tracking for clinician actions, local
+  FHIR write-back stubs, follow-up/reminder records, Kafka consumer
+  idempotency, and dead-letter routing for malformed or failed stream messages.
 - **Implemented notification handoff** - approved care plans queue a patient
   portal stub notification by default, or send an SMS through Twilio when the
   optional credentials, package, and recipient number are configured. Delivery
   results are persisted locally or in SQL and never make the decision request
-  fail.
+  fail. Follow-up status and reminder records are exposed in the Operations
+  view for handoff tracking.
 - **Planned platform services** - managed deployment, CI/CD, production
-  monitoring, circuit breakers, and FHIR write-back remain future hardening
-  work.
+  monitoring, circuit breakers, real FHIR write-back, and automated reminder
+  dispatch remain future hardening work.
 
 ### Authentication configuration
 
@@ -200,8 +203,8 @@ The MVP focuses on four user-facing capabilities:
 - Clinical context retrieval with source citations.
 - Care-plan orchestration with draft, critique, and explanation steps.
 - Clinician approve/reject actions for draft care plans plus approved mock
-  care-transition report generation; edit, notify, and
-  portal handoff remain planned workflow extensions.
+  care-transition report generation, follow-up tracking, and reminder
+  scheduling. Portal handoff and real EHR write-back remain stubbed.
 
 ## Implemented progress
 
@@ -285,7 +288,9 @@ The current repository shows the first stage of the MVP working locally:
   tool, patient chart search, both, or neither. Tool calls are returned with the
   answer as an audit trail, and chart-search tool guidance now steers the model
   toward validated clinical query phrasings instead of vague searches such as
-  "discharge summary."
+  "discharge summary." The API resolves patient names internally, blocks raw
+  patient IDs in chat, keeps risk answers in plain language, and fast-paths
+  simple risk or medication questions through the audited tools.
 - Added production-readiness helpers around the API: safe unhandled-error
   responses, required `API_KEY` protection for non-health endpoints, `/health`
   dependency checks, OIDC bearer-token verification with role-based route
@@ -309,12 +314,18 @@ The current repository shows the first stage of the MVP working locally:
   returns an approved Markdown report and saves it under `reports/` with public
   demo naming such as `care-transition-report__2026-08-09__994d6249.md`.
   Rejected drafts return an edit-required status instead of a finalized report.
+  The dashboard can copy or download the approved Markdown report.
 - Added post-approval notifications through `src.data_services.notifications`.
   The default local `portal_stub` records a queued notification; optional
   Twilio SMS delivery requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
   `TWILIO_FROM_NUMBER`, the `twilio` package, and a recipient number. Delivery
   failures are recorded without failing the approval request, and notification
   records are available through `GET /notifications`.
+- Added local FHIR write-back, follow-up, and reminder handoff records for
+  approved plans. Approval records a local FHIR `CarePlan` stub, clinicians can
+  update `pending`, `scheduled`, `contacted`, `completed`, `missed`, or
+  `readmitted` follow-up status through `/patients/{patient_ref}/follow-up`,
+  and reminders can be scheduled through `/patients/{patient_ref}/reminders`.
 - Updated the dashboard evidence panel to show cited chart excerpts directly in
   the Patient evidence panel, grouped by retrieval category and source. The
   display layer strips repeated headers, deduplicates repeated clinical items,
@@ -346,6 +357,13 @@ The current repository shows the first stage of the MVP working locally:
   `src/data_services/idempotency.py`, pauses/resumes polling under backpressure,
   retries handler failures, and routes malformed or exhausted messages to the
   configured DLQ topic.
+- Updated the Operations view with runtime status cards for Kafka,
+  notifications, and precompute progress, plus recent FHIR write-backs,
+  follow-up statuses, reminders, notifications, and audit events.
+- Updated the Care plans view with queue filters for high risk, needs review,
+  approved, rejected, missing evidence, and precomputed cases.
+- Updated patient history display to format repeated chart items and restore
+  cleaned patient display names in retrieved history excerpts.
 
 
 Committed processed data currently includes:
@@ -395,7 +413,7 @@ Latest agent-orchestration summary:
 | Orchestrator | LangGraph runs risk assessment first, skips full review for low-risk patients, and runs retrieval -> reasoning -> critique for medium/high-risk patients |
 | Chat agent | Groq function-calling interface for ad hoc clinician questions; exposes `assess_readmission_risk` and `search_patient_chart` as auditable tools |
 | Production guardrails | Safe API error handling, dependency-aware `/health`, required API key or OIDC bearer token, route-level role checks, request timeouts, request IDs, cached assessments with optional Redis backing, local JSONL/SQLite or SQL-backed persistence, idempotent decisions, and approved report export |
-| React clinician UI | Risk queue, Patients, Care plans, Ask a question, API-key demo mode or OIDC login, configurable clinician ID, decision badges with actor labels, approved report preview, and rejected edit-required status |
+| React clinician UI | Risk queue, Patients, Care plans, Ask a question, Operations, API-key demo mode or OIDC login, configurable clinician ID, decision badges with actor labels, approved report preview/copy/download, follow-up tracking, reminder scheduling, filtered care-plan queues, and rejected edit-required status |
 | Known limitation | Reasoning and critique use different OpenAI open-weight model sizes on Groq, not genuinely independent model providers |
 
 ## Clinician UI
@@ -411,12 +429,20 @@ Implemented locally in `web/`:
   labs, medications, and care-plan items formatted under clear subheaders.
 - **Draft follow-up plan** - renders the generated plan, critique status, and
   persisted approve/reject decision state. Approved decisions show a generated
-  mock care-transition report; rejected decisions show that the draft needs edit
-  and resubmission. Edit remains a placeholder.
+  mock care-transition report with copy/download actions, follow-up status
+  tracking, and reminder scheduling. Rejected decisions show that the draft
+  needs edit and resubmission.
 - **Patients** - lists recent patients from the API with cleaned display names.
-- **Care plans** - selects a patient and generates/views their draft plan.
+- **Care plans** - selects a patient and generates/views their draft plan, with
+  filters for high risk, needs review, approved, rejected, missing evidence, and
+  precomputed cases.
 - **Ask a question** - supports free-form patient questions with visible tool
-  calls and formatted assistant answers.
+  calls and formatted assistant answers. Chat rejects raw patient IDs, resolves
+  selected patient names internally, and uses fast audited paths for simple risk
+  or medication lookups.
+- **Operations** - shows audit events, FHIR write-back stubs, notifications,
+  follow-up records, reminder records, Kafka/notification/precompute status,
+  model metadata, and drift status.
 
 Design principles from the proposal:
 
@@ -443,9 +469,12 @@ with optional Redis backing, approve/reject decision persistence with local or
 SQL-backed storage, Kafka publishing and consumer processing with DLQ/idempotency
 support, Postgres migration and verification scripts, request tracing,
 idempotent actor-labeled decisions, approved care-transition report export, and
-a React UI with risk queue, Patients, Care plans, Ask a question routes,
-dashboard clinician decision controls, configurable clinician ID, OIDC
-login/logout support, and report preview/status.
+a React UI with risk queue, Patients, Care plans, Ask a question, and
+Operations routes, dashboard clinician decision controls, configurable
+clinician ID, OIDC login/logout support, report preview/copy/download,
+follow-up tracking, reminder scheduling, local FHIR write-back visibility,
+filtered care-plan queues, patient-history formatting, and grounded chat
+answers for risk and medication questions.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -457,8 +486,8 @@ enough positive events for a reliable comparison.
 Next milestones are scaling the synthetic population for a determinate fairness
 audit, calibrating retrieval distance thresholds against labeled relevance
 examples, strengthening reasoning/critique model independence, hardening the
-OIDC/RBAC deployment path, wiring the care-plan edit workflow, and adding FHIR
-write-back/notification stubs.
+OIDC/RBAC deployment path, replacing local FHIR/write-back and reminder stubs
+with real integrations, and adding managed deployment operations.
 
 ## Getting started
 
@@ -778,13 +807,18 @@ python scripts/precompute_assessments.py --category high --limit 10
 python -m unittest tests.test_decision_idempotency
 python -m unittest tests.test_patient_privacy
 python -m unittest tests.test_precompute
+python -m unittest tests.test_transition_report
+python -m unittest tests.test_notifications
+python -m unittest tests.test_chat_tools
 python -m pytest -q tests/test_kafka_consumer.py
 ```
 
 The current automated tests cover idempotent decision writes for both local
 SQLite persistence and the SQL-backed database path, as well as the background
 precomputation worker, patient-event deduplication, saved care-plan retrieval,
-HL7 intake parsing, Kafka consumer idempotency, and DLQ routing.
+HL7 intake parsing, Kafka consumer idempotency, DLQ routing, patient-ref
+privacy, report generation, notification/FHIR handoff records, follow-up and
+reminder validation, and grounded chat tool behavior.
 The modeling and retrieval checks are still run through the analysis
 scripts above.
 
@@ -842,6 +876,8 @@ results/
     |-- care_plans.jsonl           # Generated care plans
     |-- decisions.sqlite3          # Local approve/reject decisions, gitignored
     |-- notifications.jsonl        # Notification outcomes
+    |-- follow_ups.jsonl           # Follow-up status history
+    |-- reminders.jsonl            # Scheduled reminder records
     `-- fhir_writebacks.jsonl      # Local FHIR write-back stubs
 
 database/
