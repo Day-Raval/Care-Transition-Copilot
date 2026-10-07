@@ -5,6 +5,81 @@ import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
 const PAGE_SIZE = 50;
 
+function normalizeHistoryItem(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function stripSectionPrefix(text, sectionName) {
+  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`^\\s*${escaped}\\s*:\\s*`, "i"), "").trim();
+}
+
+function splitDelimitedText(text) {
+  const parts = text.split(/\s*;\s*/).map((part) => part.trim()).filter(Boolean);
+  return parts.length > 2 ? parts : null;
+}
+
+function normalizeHistoryPatientName(text, patientName) {
+  if (!patientName) return text;
+  return text.replace(/\b[A-Z][a-z]+[0-9]{2,}\b/g, patientName);
+}
+
+function formatHistoryText(text, sectionName, patientName) {
+  const cleaned = stripSectionPrefix(normalizeHistoryPatientName(text || "", patientName), sectionName || "")
+    .replace(/\r/g, "")
+    .trim();
+  const lines = cleaned.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const intro = [];
+  const rawItems = [];
+
+  lines.forEach((line) => {
+    if (/^[-*]\s+/.test(line)) {
+      rawItems.push(line.replace(/^[-*]\s+/, "").trim());
+      return;
+    }
+    const parts = splitDelimitedText(line);
+    if (parts) {
+      rawItems.push(...parts);
+    } else {
+      intro.push(line);
+    }
+  });
+
+  const counts = new Map();
+  rawItems.forEach((item) => {
+    const key = normalizeHistoryItem(item);
+    if (!key) return;
+    const current = counts.get(key);
+    counts.set(key, { text: current?.text || item, count: (current?.count || 0) + 1 });
+  });
+
+  return { intro, items: Array.from(counts.values()) };
+}
+
+function HistoryEntry({ entry, index, patientName }) {
+  const formatted = formatHistoryText(entry.text, entry.section_name, patientName);
+  return (
+    <article className="patient-history-entry" key={`${entry.discharge_ts}-${entry.section_name}-${index}`}>
+      <div className="patient-history-meta">
+        <span className="history-section-chip">{entry.section_name || "Chart note"}</span>
+      </div>
+      {formatted.intro.map((line, lineIndex) => (
+        <p key={lineIndex}>{line}</p>
+      ))}
+      {formatted.items.length > 0 && (
+        <ul className="history-item-list">
+          {formatted.items.map((item) => (
+            <li key={normalizeHistoryItem(item.text)}>
+              {item.text}
+              {item.count > 1 && <span className="history-repeat"> x{item.count}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
+  );
+}
+
 export default function Patients() {
   const [patients, setPatients] = useState([]);
   const [searchInput, setSearchInput] = useState("");
@@ -148,11 +223,12 @@ export default function Patients() {
             </div>
             {patients.map((patient) => {
               const episodeKey = `${patient.patient_ref}-${patient.discharge_ts}`;
+              const patientName = displayPatientName(patient.patient_name);
               return (
               <div className="patient-episode" key={episodeKey}>
                 <div className="patient-row">
                   <div>
-                    <div className="queue-card-name">{displayPatientName(patient.patient_name)}</div>
+                    <div className="queue-card-name">{patientName}</div>
                     <div className="patient-id">Ref ...{patient.patient_ref.slice(-4)}</div>
                   </div>
                   <div>{patient.admission_reason}</div>
@@ -187,13 +263,12 @@ export default function Patients() {
                         <p className="patient-result-count">Showing {history.length} chart excerpts</p>
                         <div className="patient-history-list">
                           {history.map((entry, index) => (
-                            <article className="patient-history-entry" key={`${entry.discharge_ts}-${entry.section_name}-${index}`}>
-                              <div className="patient-history-meta">
-                                <strong>{entry.discharge_ts ? new Date(entry.discharge_ts).toLocaleDateString() : "Date not recorded"}</strong>
-                                <span>{entry.section_name}</span>
-                              </div>
-                              <p>{entry.text}</p>
-                            </article>
+                            <HistoryEntry
+                              entry={entry}
+                              index={index}
+                              patientName={patientName}
+                              key={`${entry.discharge_ts}-${entry.section_name}-${index}`}
+                            />
                           ))}
                         </div>
                         {historyHasMore && (

@@ -3,9 +3,11 @@ import {
   getAuditEvents,
   getDriftReport,
   getFhirWritebacks,
+  getFollowUps,
   getHealth,
   getModelInfo,
   getNotifications,
+  getReminders,
 } from "../api.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
@@ -49,6 +51,8 @@ export default function Operations() {
   const [events, setEvents] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [writebacks, setWritebacks] = useState([]);
+  const [followUps, setFollowUps] = useState([]);
+  const [reminders, setReminders] = useState([]);
   const [system, setSystem] = useState({ health: null, model: null, drift: null, errors: [] });
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -61,21 +65,29 @@ export default function Operations() {
       getAuditEvents({ limit: 100, requestId: filters.requestId ?? requestId }),
       getNotifications(50),
       getFhirWritebacks(50),
+      getFollowUps(50),
+      getReminders(50),
       getHealth(),
       getModelInfo(),
       getDriftReport(),
     ])
-      .then(([auditResult, notificationResult, writebackResult, healthResult, modelResult, driftResult]) => {
+      .then(([auditResult, notificationResult, writebackResult, followUpResult, reminderResult, healthResult, modelResult, driftResult]) => {
         setEvents(resultValue(auditResult, []));
         setNotifications(resultValue(notificationResult, []));
         setWritebacks(resultValue(writebackResult, []));
+        setFollowUps(resultValue(followUpResult, []));
+        setReminders(resultValue(reminderResult, []));
         setSystem({
           health: resultValue(healthResult),
           model: resultValue(modelResult),
           drift: resultValue(driftResult),
           errors: [healthResult, modelResult, driftResult].map(resultError).filter(Boolean),
         });
-        const primaryError = resultError(auditResult) || resultError(notificationResult) || resultError(writebackResult);
+        const primaryError = resultError(auditResult)
+          || resultError(notificationResult)
+          || resultError(writebackResult)
+          || resultError(followUpResult)
+          || resultError(reminderResult);
         if (primaryError) setError(primaryError);
       })
       .finally(() => setLoading(false));
@@ -181,6 +193,49 @@ export default function Operations() {
                     {writeback.patient_ref && ` | patient ${shortId(writeback.patient_ref)}`}
                   </div>
                   <EventDetails event={writeback} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Follow-ups</h2>
+          <p className="panel-subtitle">Latest care-transition follow-up statuses</p>
+
+          {!loading && !error && followUps.length === 0 && <EmptyState>No follow-up statuses recorded yet.</EmptyState>}
+          {!loading && !error && followUps.length > 0 && (
+            <div className="event-list">
+              {followUps.map((followUp, index) => (
+                <div className="event-row" key={`${followUp.timestamp}-${index}`}>
+                  <div className="event-title">{followUp.status}</div>
+                  <div className="event-meta">
+                    {prettyDate(followUp.timestamp)}
+                    {followUp.patient_ref && ` | patient ${shortId(followUp.patient_ref)}`}
+                    {followUp.actor && ` | ${followUp.actor}`}
+                  </div>
+                  {followUp.note && <p className="muted">{followUp.note}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>Reminders</h2>
+          <p className="panel-subtitle">Scheduled notification reminders for follow-up work</p>
+
+          {!loading && !error && reminders.length === 0 && <EmptyState>No reminders scheduled yet.</EmptyState>}
+          {!loading && !error && reminders.length > 0 && (
+            <div className="event-list">
+              {reminders.map((reminder, index) => (
+                <div className="event-row" key={`${reminder.timestamp}-${index}`}>
+                  <div className="event-title">{reminder.status}: {prettyDate(reminder.remind_at)}</div>
+                  <div className="event-meta">
+                    {reminder.patient_ref && `patient ${shortId(reminder.patient_ref)}`}
+                    {reminder.actor && ` | ${reminder.actor}`}
+                  </div>
+                  {reminder.message && <p className="muted">{reminder.message}</p>}
                 </div>
               ))}
             </div>

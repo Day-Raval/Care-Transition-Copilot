@@ -104,6 +104,27 @@ export function getReport(patientRef, dischargeTs = null) {
   return request(`/patients/${patientPath(patientRef)}/report${params}`);
 }
 
+export function getFollowUp(patientRef, dischargeTs = null) {
+  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  return request(`/patients/${patientPath(patientRef)}/follow-up${params}`);
+}
+
+export function saveFollowUpStatus(patientRef, dischargeTs, status, note = null) {
+  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  return request(`/patients/${patientPath(patientRef)}/follow-up${params}`, {
+    method: "POST",
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export function scheduleReminder(patientRef, dischargeTs, remindAt, message = null) {
+  const params = dischargeTs ? `?${new URLSearchParams({ discharge_ts: dischargeTs })}` : "";
+  return request(`/patients/${patientPath(patientRef)}/reminders${params}`, {
+    method: "POST",
+    body: JSON.stringify({ remind_at: remindAt, message }),
+  });
+}
+
 export function getSavedCarePlans(limit = 50) {
   return request(`/care-plans?${new URLSearchParams({ limit })}`);
 }
@@ -114,6 +135,14 @@ export function getNotifications(limit = 50) {
 
 export function getFhirWritebacks(limit = 50) {
   return request(`/fhir-writebacks?${new URLSearchParams({ limit })}`);
+}
+
+export function getFollowUps(limit = 50) {
+  return request(`/follow-ups?${new URLSearchParams({ limit })}`);
+}
+
+export function getReminders(limit = 50) {
+  return request(`/reminders?${new URLSearchParams({ limit })}`);
 }
 
 export function getAuditEvents({ limit = 100, requestId = "" } = {}) {

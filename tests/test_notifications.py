@@ -135,6 +135,36 @@ class NotificationsPersistenceTest(unittest.TestCase):
             self.assertEqual(len(saved), 1)
             self.assertEqual(saved[0]["patient_id"], "patient-1")
 
+    def test_follow_up_status_and_reminder_persist_locally(self):
+        old_follow_ups_path = production.FOLLOW_UPS_PATH
+        old_reminders_path = production.REMINDERS_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            production.FOLLOW_UPS_PATH = Path(tmpdir) / "follow_ups.jsonl"
+            production.REMINDERS_PATH = Path(tmpdir) / "reminders.jsonl"
+            try:
+                follow_up = production.save_follow_up_status(
+                    patient_id="patient-1",
+                    discharge_ts="2026-09-24",
+                    status="contacted",
+                    actor="clinician-1",
+                    note="Reached patient portal.",
+                )
+                reminder = production.schedule_notification_reminder(
+                    patient_id="patient-1",
+                    discharge_ts="2026-09-24",
+                    remind_at="2026-09-26T09:00",
+                    message="Check scheduled follow-up.",
+                    actor="clinician-1",
+                )
+
+                self.assertEqual(follow_up["status"], "contacted")
+                self.assertEqual(production.latest_follow_up("patient-1", "2026-09-24")["note"], "Reached patient portal.")
+                self.assertEqual(reminder["status"], "scheduled")
+                self.assertEqual(production.read_reminders(limit=10)[0]["message"], "Check scheduled follow-up.")
+            finally:
+                production.FOLLOW_UPS_PATH = old_follow_ups_path
+                production.REMINDERS_PATH = old_reminders_path
+
 
 if __name__ == "__main__":
     unittest.main()

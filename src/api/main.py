@@ -43,6 +43,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime
 from typing import Any
 
 import jwt
@@ -64,6 +65,7 @@ from src.api.production import (
     build_transition_report,
     init_decision_db,
     latest_decision,
+    latest_follow_up,
     latest_saved_care_plan,
     load_discharge_records,
     log_audit_event,
@@ -71,13 +73,17 @@ from src.api.production import (
     read_audit_events,
     read_care_plans,
     read_fhir_writebacks,
+    read_follow_ups,
     read_notifications,
+    read_reminders,
     record_fhir_writeback,
     reset_audit_request_id,
     runtime_dependency_report,
     save_care_plan,
     save_decision,
+    save_follow_up_status,
     save_transition_report,
+    schedule_notification_reminder,
     set_audit_request_id,
 )
 from src.api.precompute import precompute_manager
@@ -90,6 +96,8 @@ from src.api.schemas import (
     DischargeEventTriggerRequest,
     DriftReport,
     FullAssessment,
+    FollowUpRecord,
+    FollowUpRequest,
     HL7IntakeRequest,
     IntakeResultResponse,
     ModelInfo,
@@ -100,6 +108,8 @@ from src.api.schemas import (
     PrecomputeRequest,
     PrecomputeStatus,
     QueueItem,
+    ReminderRecord,
+    ReminderRequest,
     RiskPrediction,
     TransitionReport,
     build_patient_features_model,
@@ -747,6 +757,14 @@ def _build_patient_queue_items(category: str | None = None, search: str = "") ->
     return items
 
 
+def _validate_reminder_time(remind_at: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(remind_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="remind_at must be an ISO date/time")
+    return parsed.isoformat(timespec="minutes")
+
+
 @app.get("/patients/{patient_ref}/history", response_model=PatientHistoryResponse)
 def patient_history(patient_ref: str, limit: int = 50, offset: int = 0):
     if not _state:
@@ -919,6 +937,85 @@ def patient_report(patient_ref: str, discharge_ts: str | None = None):
     )
 
 
+@app.get("/patients/{patient_ref}/follow-up", response_model=FollowUpRecord | None, response_model_exclude={"patient_id"})
+def patient_follow_up(patient_ref: str, discharge_ts: str | None = None):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    record = latest_follow_up(patient_id, episode_discharge_ts)
+    return {**record, "patient_ref": _patient_ref(patient_id)} if record else None
+
+
+@app.post("/patients/{patient_ref}/follow-up", response_model=FollowUpRecord, response_model_exclude={"patient_id"})
+def save_patient_follow_up(
+    patient_ref: str,
+    body: FollowUpRequest,
+    http_request: Request,
+    discharge_ts: str | None = None,
+):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    decision = latest_decision(patient_id, episode_discharge_ts)
+    if decision is None or decision["decision"] != "approved":
+        raise HTTPException(status_code=409, detail="Follow-up status requires an approved care plan")
+    actor = _clinician_actor(http_request)
+    record = save_follow_up_status(
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        status=body.status,
+        actor=actor,
+        note=body.note,
+    )
+    log_audit_event(
+        "follow_up_status_recorded",
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        actor=actor,
+        status=body.status,
+    )
+    return FollowUpRecord(**record, patient_ref=_patient_ref(patient_id))
+
+
+@app.post("/patients/{patient_ref}/reminders", response_model=ReminderRecord, response_model_exclude={"patient_id"})
+def schedule_patient_reminder(
+    patient_ref: str,
+    body: ReminderRequest,
+    http_request: Request,
+    discharge_ts: str | None = None,
+):
+    if not _state:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    patient_id = _resolve_patient_key(patient_ref)
+    episode_discharge_ts = _latest_discharge_ts(patient_id, discharge_ts)
+    decision = latest_decision(patient_id, episode_discharge_ts)
+    if decision is None or decision["decision"] != "approved":
+        raise HTTPException(status_code=409, detail="Reminder requires an approved care plan")
+    follow_up = latest_follow_up(patient_id, episode_discharge_ts)
+    if follow_up is None:
+        raise HTTPException(status_code=409, detail="Record follow-up status before scheduling a reminder")
+    actor = _clinician_actor(http_request)
+    remind_at = _validate_reminder_time(body.remind_at)
+    message = body.message or "Follow up on the approved care-transition plan."
+    record = schedule_notification_reminder(
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        remind_at=remind_at,
+        message=message,
+        actor=actor,
+    )
+    log_audit_event(
+        "notification_reminder_scheduled",
+        patient_id=patient_id,
+        discharge_ts=episode_discharge_ts,
+        actor=actor,
+        remind_at=remind_at,
+    )
+    return ReminderRecord(**record, patient_ref=_patient_ref(patient_id))
+
+
 @app.get("/care-plans")
 def saved_care_plans(limit: int = 50):
     return [_redact_patient_record(record) for record in read_care_plans(limit=limit)]
@@ -927,6 +1024,16 @@ def saved_care_plans(limit: int = 50):
 @app.get("/notifications")
 def saved_notifications(limit: int = 50):
     return [_redact_patient_record(record) for record in read_notifications(limit=limit)]
+
+
+@app.get("/follow-ups")
+def saved_follow_ups(limit: int = 50):
+    return [_redact_patient_record(record) for record in read_follow_ups(limit=limit)]
+
+
+@app.get("/reminders")
+def saved_reminders(limit: int = 50):
+    return [_redact_patient_record(record) for record in read_reminders(limit=limit)]
 
 
 @app.get("/fhir-writebacks")

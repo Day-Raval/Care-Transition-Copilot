@@ -6,3 +6,5 @@ Clinician workflow artifacts:
 - `decisions.sqlite3` - approve/reject decision store.
 - `notifications.jsonl` - notification outcomes.
 - `fhir_writebacks.jsonl` - local FHIR write-back stubs for approved plans.
+- `follow_ups.jsonl` - care-transition follow-up statuses.
+- `reminders.jsonl` - scheduled notification reminders.

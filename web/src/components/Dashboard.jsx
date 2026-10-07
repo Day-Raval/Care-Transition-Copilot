@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
-import { getQueue, getAssessment, getDecision, getReport, saveDecision } from "../api.js";
+import {
+  getAssessment,
+  getDecision,
+  getFollowUp,
+  getQueue,
+  getReport,
+  saveDecision,
+  saveFollowUpStatus,
+  scheduleReminder,
+} from "../api.js";
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
 import { displayPatientName } from "../patientNames.js";
 import { useAuth } from "../AuthContext.jsx";
+
+const FOLLOW_UP_STATUSES = ["pending", "scheduled", "contacted", "completed", "missed", "readmitted"];
 
 function jaccardSimilarity(a, b) {
   const wordsA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
@@ -408,6 +419,15 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [isEditingPlan, setIsEditingPlan] = useState(false);
   const [editedDraftPlan, setEditedDraftPlan] = useState("");
+  const [reportActionMessage, setReportActionMessage] = useState("");
+  const [followUp, setFollowUp] = useState(null);
+  const [followUpStatus, setFollowUpStatus] = useState("pending");
+  const [followUpNote, setFollowUpNote] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [reminderAt, setReminderAt] = useState("");
+  const [reminderMessage, setReminderMessage] = useState("");
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [reminderStatus, setReminderStatus] = useState("");
 
   useEffect(() => {
     getQueue(null, 20)
@@ -424,14 +444,27 @@ export default function Dashboard() {
     setError(null);
     setIsEditingPlan(false);
     setEditedDraftPlan("");
+    setReportActionMessage("");
+    setFollowUp(null);
+    setFollowUpStatus("pending");
+    setFollowUpNote("");
+    setReminderAt("");
+    setReminderMessage("");
+    setReminderStatus("");
     setLoadingAssessment(true);
     Promise.all([
       getAssessment(item.patient_ref, item.discharge_ts),
       getDecision(item.patient_ref, item.discharge_ts),
+      getFollowUp(item.patient_ref, item.discharge_ts),
     ])
-      .then(([assessmentResult, decisionResult]) => {
+      .then(([assessmentResult, decisionResult, followUpResult]) => {
         setAssessment(assessmentResult);
         setDecision(decisionResult);
+        setFollowUp(followUpResult);
+        if (followUpResult) {
+          setFollowUpStatus(followUpResult.status);
+          setFollowUpNote(followUpResult.note || "");
+        }
         setEditedDraftPlan(displayCarePlanText(decisionResult?.draft_plan || assessmentResult.draft_plan));
         if (decisionResult) loadReport(item);
       })
@@ -448,6 +481,32 @@ export default function Dashboard() {
       .finally(() => setLoadingReport(false));
   }
 
+  function reportFileName() {
+    const path = report?.report_path || "care-transition-report.md";
+    return path.split(/[\\/]/).pop() || "care-transition-report.md";
+  }
+
+  function downloadReport() {
+    if (!report?.report_markdown) return;
+    const url = URL.createObjectURL(new Blob([report.report_markdown], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = reportFileName();
+    link.click();
+    URL.revokeObjectURL(url);
+    setReportActionMessage("Downloaded");
+  }
+
+  async function copyReport() {
+    if (!report?.report_markdown) return;
+    try {
+      await navigator.clipboard.writeText(report.report_markdown);
+      setReportActionMessage("Copied");
+    } catch {
+      setReportActionMessage("Copy unavailable");
+    }
+  }
+
   function recordDecision(nextDecision, draftPlan = null) {
     if (!selected) return;
     setSavingDecision(true);
@@ -461,6 +520,32 @@ export default function Dashboard() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setSavingDecision(false));
+  }
+
+  function saveFollowUp() {
+    if (!selected) return;
+    setSavingFollowUp(true);
+    setError(null);
+    saveFollowUpStatus(selected.patient_ref, selected.discharge_ts, followUpStatus, followUpNote || null)
+      .then((saved) => {
+        setFollowUp(saved);
+        setFollowUpStatus(saved.status);
+        setFollowUpNote(saved.note || "");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSavingFollowUp(false));
+  }
+
+  function saveReminder() {
+    if (!selected || !reminderAt) return;
+    setSavingReminder(true);
+    setError(null);
+    scheduleReminder(selected.patient_ref, selected.discharge_ts, reminderAt, reminderMessage || null)
+      .then((saved) => {
+        setReminderStatus(`Reminder scheduled for ${new Date(saved.remind_at).toLocaleString()}`);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSavingReminder(false));
   }
 
   function toggleEditPlan() {
@@ -672,10 +757,61 @@ export default function Dashboard() {
                         <div className="report-preview">
                           <div className="checklist-label">Mock discharge/care-transition report</div>
                           {report.report_path && <p className="muted">Saved to {report.report_path}</p>}
+                          <div className="report-actions">
+                            <button className="btn edit" onClick={copyReport}>Copy Markdown</button>
+                            <button className="btn edit" onClick={downloadReport}>Download</button>
+                            {reportActionMessage && <span className="btn-note">{reportActionMessage}</span>}
+                          </div>
                           <div
                             className="plan-rendered"
                             dangerouslySetInnerHTML={{ __html: renderMarkdown(report.report_markdown) }}
                           />
+                        </div>
+                      )}
+                      {report?.status === "approved" && canDecide && (
+                        <div className="follow-up-panel">
+                          <div className="checklist-label">Follow-up tracking</div>
+                          <div className="follow-up-grid">
+                            <select
+                              value={followUpStatus}
+                              onChange={(e) => setFollowUpStatus(e.target.value)}
+                            >
+                              {FOLLOW_UP_STATUSES.map((status) => (
+                                <option key={status} value={status}>{status}</option>
+                              ))}
+                            </select>
+                            <input
+                              value={followUpNote}
+                              onChange={(e) => setFollowUpNote(e.target.value)}
+                              placeholder="Note"
+                            />
+                            <button className="btn edit" disabled={savingFollowUp} onClick={saveFollowUp}>
+                              Save status
+                            </button>
+                          </div>
+                          {followUp && <div className="event-meta">Last status: {followUp.status} by {followUp.actor}</div>}
+                          <div className="follow-up-grid">
+                            <input
+                              type="datetime-local"
+                              value={reminderAt}
+                              onChange={(e) => setReminderAt(e.target.value)}
+                              disabled={!followUp}
+                            />
+                            <input
+                              value={reminderMessage}
+                              onChange={(e) => setReminderMessage(e.target.value)}
+                              placeholder="Reminder message"
+                              disabled={!followUp}
+                            />
+                            <button
+                              className="btn edit"
+                              disabled={savingReminder || !followUp || !reminderAt}
+                              onClick={saveReminder}
+                            >
+                              Schedule reminder
+                            </button>
+                          </div>
+                          {reminderStatus && <div className="event-meta">{reminderStatus}</div>}
                         </div>
                       )}
                     </>

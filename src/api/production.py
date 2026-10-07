@@ -47,6 +47,8 @@ AUDIT_LOG_PATH = OPERATIONS_RESULTS_DIR / "audit_log.jsonl"
 CARE_PLANS_PATH = CARE_DELIVERY_RESULTS_DIR / "care_plans.jsonl"
 NOTIFICATIONS_PATH = CARE_DELIVERY_RESULTS_DIR / "notifications.jsonl"
 FHIR_WRITEBACKS_PATH = CARE_DELIVERY_RESULTS_DIR / "fhir_writebacks.jsonl"
+FOLLOW_UPS_PATH = CARE_DELIVERY_RESULTS_DIR / "follow_ups.jsonl"
+REMINDERS_PATH = CARE_DELIVERY_RESULTS_DIR / "reminders.jsonl"
 DECISIONS_DB_PATH = CARE_DELIVERY_RESULTS_DIR / "decisions.sqlite3"
 REPORTS_DIR = Path("reports")
 CHROMA_PATH = "data/processed/chroma_db"
@@ -128,6 +130,31 @@ _fhir_writebacks_table = Table(
     Column("patient_id", String, nullable=False),
     Column("discharge_ts", String, nullable=False),
     Column("status", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+
+_follow_ups_table = Table(
+    "follow_ups",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("patient_id", String, nullable=False),
+    Column("discharge_ts", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("actor", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+
+_reminders_table = Table(
+    "notification_reminders",
+    _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", String, nullable=False),
+    Column("patient_id", String, nullable=False),
+    Column("discharge_ts", String, nullable=False),
+    Column("remind_at", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("actor", String, nullable=False),
     Column("payload_json", Text, nullable=False),
 )
 
@@ -446,6 +473,137 @@ def read_fhir_writebacks(limit: int = 100) -> list[dict[str, Any]]:
             )
             return [json.loads(row.payload_json) for row in rows]
     return read_jsonl(FHIR_WRITEBACKS_PATH, limit=limit)
+
+
+def save_follow_up_status(
+    patient_id: str,
+    discharge_ts: str,
+    status: str,
+    actor: str,
+    note: str | None = None,
+) -> dict[str, Any]:
+    record = {
+        "timestamp": utc_now(),
+        "patient_id": patient_id,
+        "discharge_ts": discharge_ts,
+        "status": status,
+        "actor": actor,
+        "note": note or "",
+    }
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _follow_ups_table.insert().values(
+                    timestamp=record["timestamp"],
+                    patient_id=patient_id,
+                    discharge_ts=discharge_ts,
+                    status=status,
+                    actor=actor,
+                    payload_json=_json_dumps(record),
+                )
+            )
+    else:
+        append_jsonl(FOLLOW_UPS_PATH, record)
+    return record
+
+
+def read_follow_ups(limit: int = 100) -> list[dict[str, Any]]:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM follow_ups
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            return [json.loads(row.payload_json) for row in rows]
+    return read_jsonl(FOLLOW_UPS_PATH, limit=limit)
+
+
+def latest_follow_up(patient_id: str, discharge_ts: str) -> dict[str, Any] | None:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM follow_ups
+                    WHERE patient_id = :patient_id AND discharge_ts = :discharge_ts
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"patient_id": patient_id, "discharge_ts": discharge_ts},
+            ).fetchone()
+            return json.loads(row.payload_json) if row else None
+    for record in read_jsonl(FOLLOW_UPS_PATH, limit=10000):
+        if record.get("patient_id") == patient_id and record.get("discharge_ts") == discharge_ts:
+            return record
+    return None
+
+
+def schedule_notification_reminder(
+    patient_id: str,
+    discharge_ts: str,
+    remind_at: str,
+    message: str,
+    actor: str,
+) -> dict[str, Any]:
+    record = {
+        "timestamp": utc_now(),
+        "patient_id": patient_id,
+        "discharge_ts": discharge_ts,
+        "remind_at": remind_at,
+        "message": message,
+        "status": "scheduled",
+        "actor": actor,
+    }
+    if use_database():
+        init_decision_db()
+        with _db_engine().begin() as conn:
+            conn.execute(
+                _reminders_table.insert().values(
+                    timestamp=record["timestamp"],
+                    patient_id=patient_id,
+                    discharge_ts=discharge_ts,
+                    remind_at=remind_at,
+                    status=record["status"],
+                    actor=actor,
+                    payload_json=_json_dumps(record),
+                )
+            )
+    else:
+        append_jsonl(REMINDERS_PATH, record)
+    return record
+
+
+def read_reminders(limit: int = 100) -> list[dict[str, Any]]:
+    if use_database():
+        init_decision_db()
+        with _db_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT payload_json
+                    FROM notification_reminders
+                    ORDER BY remind_at ASC, id ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            return [json.loads(row.payload_json) for row in rows]
+    records = read_jsonl(REMINDERS_PATH, limit=10000)
+    records.sort(key=lambda r: r.get("remind_at", ""))
+    return records[:limit]
 
 
 def medication_context(summary: str) -> str:

@@ -262,6 +262,29 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
 }
 .report-status.rejected { border-color: #F0C4BE; color: var(--danger); background: var(--danger-bg); }
 .report-preview { max-height: 420px; overflow-y: auto; }
+.report-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.follow-up-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #FFFFFF;
+}
+.follow-up-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(140px, 1fr) auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+.follow-up-grid input,
+.follow-up-grid select {
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  background: #FFFFFF;
+}
 
 .workflow-timeline {
   border: 1px solid var(--border);
@@ -502,11 +525,43 @@ details summary { cursor: pointer; font-size: 13px; color: var(--teal); margin: 
 .patient-history { padding: 14px; background: var(--bg); border-top: 1px solid var(--border); }
 .patient-history h3 { margin: 0 0 4px; font-size: 14px; }
 .patient-history-note { color: var(--text-muted); font-size: 12px; margin: 0 0 12px; }
-.patient-history-list { display: grid; gap: 10px; }
-.patient-history-entry { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); }
+.patient-history-list {
+  display: grid;
+  gap: 10px;
+}
+.patient-history-entry {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
 .patient-history-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--text-muted); font-size: 12px; }
-.patient-history-meta strong { color: var(--text); }
-.patient-history-entry p { margin: 8px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+.history-section-chip {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #EEF1F8;
+  color: var(--navy);
+  font-size: 11px;
+  font-weight: 700;
+}
+.patient-history-entry p { margin: 8px 0 0; font-size: 13px; line-height: 1.55; }
+.history-item-list {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.history-repeat {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
 .care-plan-layout {
   display: grid;
   grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
@@ -611,6 +666,7 @@ summary:focus-visible {
   .dashboard-grid,
   .care-plan-layout,
   .operations-layout { grid-template-columns: 1fr; }
-  .filter-row { grid-template-columns: 1fr; }
+  .filter-row,
+  .follow-up-grid { grid-template-columns: 1fr; }
   .patient-row { grid-template-columns: 1fr; gap: 6px; }
 }

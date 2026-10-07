@@ -149,6 +149,37 @@ class TransitionReport(BaseModel):
     report_path: str | None = None
 
 
+class FollowUpRequest(BaseModel):
+    status: Literal["pending", "scheduled", "contacted", "completed", "missed", "readmitted"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class FollowUpRecord(BaseModel):
+    patient_id: str
+    patient_ref: str | None = None
+    discharge_ts: str
+    status: str
+    actor: str
+    timestamp: str
+    note: str = ""
+
+
+class ReminderRequest(BaseModel):
+    remind_at: str = Field(..., min_length=1, max_length=40)
+    message: str | None = Field(default=None, max_length=500)
+
+
+class ReminderRecord(BaseModel):
+    patient_id: str
+    patient_ref: str | None = None
+    discharge_ts: str
+    remind_at: str
+    message: str
+    status: str
+    actor: str
+    timestamp: str
+
+
 class DriftReport(BaseModel):
     status: str
     n_recent_predictions: int

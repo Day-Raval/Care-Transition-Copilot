@@ -94,3 +94,34 @@ class TransitionReportTest(unittest.TestCase):
                 self.assertIn("Follow up with cardiology", saved[0]["resource"]["description"])
             finally:
                 production.FHIR_WRITEBACKS_PATH = original_path
+
+    def test_reminder_requires_follow_up_status(self):
+        old_state = main._state.copy()
+        old_resolve = main._resolve_patient_key
+        old_latest_discharge_ts = main._latest_discharge_ts
+        old_latest_decision = main.latest_decision
+        old_latest_follow_up = main.latest_follow_up
+        try:
+            main._state.clear()
+            main._state["ready"] = True
+            main._resolve_patient_key = lambda patient_ref: "patient-1"
+            main._latest_discharge_ts = lambda patient_id, discharge_ts=None: "2026-09-24"
+            main.latest_decision = lambda patient_id, discharge_ts=None: {"decision": "approved"}
+            main.latest_follow_up = lambda patient_id, discharge_ts=None: None
+
+            with self.assertRaises(main.HTTPException) as caught:
+                main.schedule_patient_reminder(
+                    "patient-ref",
+                    main.ReminderRequest(remind_at="2026-09-26T09:00"),
+                    None,
+                    "2026-09-24",
+                )
+            self.assertEqual(caught.exception.status_code, 409)
+            self.assertIn("Record follow-up status", caught.exception.detail)
+        finally:
+            main._state.clear()
+            main._state.update(old_state)
+            main._resolve_patient_key = old_resolve
+            main._latest_discharge_ts = old_latest_discharge_ts
+            main.latest_decision = old_latest_decision
+            main.latest_follow_up = old_latest_follow_up

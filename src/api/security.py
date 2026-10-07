@@ -59,13 +59,15 @@ def required_roles(method: str, path: str) -> set[str] | None:
         return {"data_scientist", "admin"}
     if method == "POST" and path.startswith("/patients/") and path.endswith("/decision"):
         return {"clinician", "admin"}
+    if method == "POST" and path.startswith("/patients/") and path.endswith(("/follow-up", "/reminders")):
+        return {"clinician", "admin"}
     if method == "POST" and path == "/patients/search":
         return {"care_coordinator", "clinician", "admin"}
     if method == "GET" and path.startswith("/patients/") and path.endswith("/report"):
         return {"care_coordinator", "clinician", "admin"}
     if path == "/model-info":
         return {"care_coordinator", "clinician", "data_scientist", "admin"}
-    if method == "GET" and path in {"/audit-events", "/notifications", "/fhir-writebacks"}:
+    if method == "GET" and path in {"/audit-events", "/notifications", "/fhir-writebacks", "/follow-ups", "/reminders"}:
         return {"clinician", "admin"}
     if method == "GET" and path.startswith(("/patients", "/care-plans")):
         return {"care_coordinator", "clinician", "admin"}
