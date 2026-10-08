@@ -1,7 +1,35 @@
 [project]
 name = "care-transition-copilot"
 version = "0.1.0"
-description = "Add your description here"
+description = "Synthetic-data care transition AI demo with readmission risk scoring, retrieval, and clinician review."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+license = "MIT"
+dependencies = [
+    "scikit-survival",
+    "lifelines",
+    "shap",
+    "fairlearn",
+    "fastapi",
+    "uvicorn",
+    "langgraph",
+    "llama-index",
+    "chromadb",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "python-dotenv",
+    "hl7apy",
+    "fhir.resources",
+    "groq",
+    "requests",
+    "redis",
+    "PyJWT[crypto]",
+    "confluent-kafka",
+    "langsmith",
+    "prometheus-client",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
