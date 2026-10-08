@@ -57,8 +57,9 @@ local-or-database persistence, Postgres migration/verification scripts, saved
 draft care-plan records, approve/reject decisions, real-time HL7/structured
 discharge intake, Kafka producers, and a persistent Kafka consumer with DLQ and
 idempotency handling. Approved plans now also record local FHIR write-back
-stubs, follow-up statuses, and scheduled reminder records. Managed deployments,
-production monitoring, and real EHR integration are still planned work.
+stubs, follow-up statuses, scheduled reminder records, and local
+Prometheus/Grafana observability. Managed deployments, hosted alerting, and
+real EHR integration are still planned work.
 
 ```mermaid
 flowchart TB
@@ -259,6 +260,7 @@ flowchart TB
   OIDC bearer-token verification with role checks for user access, request
   timeouts, cached assessment generation with optional Redis backing,
   file-based or SQL-backed audit/care-plan persistence, request tracing,
+  Prometheus-compatible `/metrics`, optional redacted LangSmith tracing,
   idempotent care-plan decisions, actor tracking for clinician actions, local
   FHIR write-back stubs, follow-up/reminder records, Kafka consumer
   idempotency, and dead-letter routing for malformed or failed stream messages.
@@ -268,9 +270,9 @@ flowchart TB
   results are persisted locally or in SQL and never make the decision request
   fail. Follow-up status and reminder records are exposed in the Operations
   view for handoff tracking.
-- **Planned platform services** - managed deployment, CI/CD, production
-  monitoring, circuit breakers, real FHIR write-back, and automated reminder
-  dispatch remain future hardening work.
+- **Planned platform services** - managed deployment, CI/CD, hosted alerting,
+  circuit breakers, real FHIR write-back, and automated reminder dispatch
+  remain future hardening work.
 
 ### Authentication configuration
 
@@ -456,6 +458,11 @@ The current repository shows the first stage of the MVP working locally:
   approved, rejected, missing evidence, and precomputed cases.
 - Updated patient history display to format repeated chart items and restore
   cleaned patient display names in retrieved history excerpts.
+- Added observability in `src/api/observability.py`: `/metrics` exposes
+  Prometheus counters and histograms for HTTP, risk prediction, agent, tool, and
+  LLM activity; optional LangSmith traces use redacted metadata instead of raw
+  patient text or prompts; `docker-compose.observability.yml` starts the local
+  Prometheus/Grafana stack.
 
 
 Committed processed data currently includes:
@@ -565,8 +572,9 @@ a React UI with risk queue, Patients, Care plans, Ask a question, and
 Operations routes, dashboard clinician decision controls, configurable
 clinician ID, OIDC login/logout support, report preview/copy/download,
 follow-up tracking, reminder scheduling, local FHIR write-back visibility,
-filtered care-plan queues, patient-history formatting, and grounded chat
-answers for risk and medication questions.
+filtered care-plan queues, patient-history formatting, grounded chat answers for
+risk and medication questions, Prometheus/Grafana observability, and redacted
+LangSmith tracing hooks.
 
 The current modeling work is still diagnostic rather than production-ready. The
 dataset has only 52 positive readmission events, so the comparison workflow
@@ -746,6 +754,19 @@ at `results/operations/idempotency.sqlite3` by default, retries failed handlers,
 malformed or unprocessable messages to the DLQ topic. The `/health` response
 includes `kafka_consumer` stats when the background consumer is enabled.
 
+Prometheus metrics are available at `/metrics` without API-key or OIDC setup.
+To run the local observability stack, start the API and then run:
+
+```bash
+docker compose -f docker-compose.observability.yml up
+```
+
+Prometheus runs at `http://localhost:9090`; Grafana runs at
+`http://localhost:3000` with the default local login `admin` / `admin`.
+Optional LangSmith tracing is enabled by setting `LANGSMITH_TRACING=true`,
+`LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT`; trace inputs intentionally avoid
+raw patient IDs, names, prompts, chart text, and model outputs.
+
 See `database/README.md` for connection-check and one-time migration scripts
 that move existing local JSONL/SQLite data and `discharge_records_with_target.csv`
 into Postgres.
@@ -903,6 +924,7 @@ python -m unittest tests.test_precompute
 python -m unittest tests.test_transition_report
 python -m unittest tests.test_notifications
 python -m unittest tests.test_chat_tools
+python -m unittest tests.test_observability
 python -m pytest -q tests/test_kafka_consumer.py
 ```
 
@@ -911,7 +933,8 @@ SQLite persistence and the SQL-backed database path, as well as the background
 precomputation worker, patient-event deduplication, saved care-plan retrieval,
 HL7 intake parsing, Kafka consumer idempotency, DLQ routing, patient-ref
 privacy, report generation, notification/FHIR handoff records, follow-up and
-reminder validation, and grounded chat tool behavior.
+reminder validation, grounded chat tool behavior, and privacy-safe metrics
+instrumentation.
 The modeling and retrieval checks are still run through the analysis
 scripts above.
 
@@ -1005,6 +1028,7 @@ or data use agreement is required to run or demo it. See
 | Implemented frontend | React, Vite, React Router |
 | Optional data services | Postgres, Redis, Kafka producer/consumer integration, DLQ routing, local SQLite idempotency store |
 | Optional notifications | Twilio SMS or local patient portal stub |
+| Optional observability | Prometheus metrics, Grafana dashboard, redacted LangSmith tracing |
 
 ## Success criteria
 

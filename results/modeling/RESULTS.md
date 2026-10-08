@@ -581,7 +581,8 @@ still requires the shared `API_KEY`.
 
 This is still not full clinical production readiness. It proves the app boundary
 can enforce identity and roles, but deployment-specific identity-provider setup,
-managed secrets, monitoring, and incident operations remain future work.
+managed secrets, hosted monitoring/alerting, and incident operations remain
+future work.
 
 ## Latest Care-Delivery Workflow Update - Reports, Follow-ups, Reminders, and Chat Grounding
 
@@ -612,6 +613,32 @@ the clinician workflow after approval and tightened the ad hoc chat surface.
 | `tests/test_notifications.py` | Notification and FHIR handoff records after approval |
 | `tests/test_patient_privacy.py` | Patient-ref privacy and chat identifier redaction |
 | `tests/test_chat_tools.py` | Plain-language risk interpretation and validated chart-search guidance |
+
+## Latest Observability Update - Metrics, Tracing, and Patient History
+
+**Status: Local observability is wired without exposing patient payloads.**
+
+The latest commits did not change the survival-model result. They added runtime
+instrumentation around the API and agent path, plus a cleaner patient-history
+display in the React Patients view.
+
+### What was added
+
+| Addition | Current behavior |
+|---|---|
+| Metrics endpoint | `/metrics` is mounted outside API-key/OIDC enforcement so Prometheus can scrape it |
+| HTTP metrics | Request counters and duration histograms are labeled by method, redacted route, and status |
+| Model/agent metrics | Risk predictions, agent runs, LLM calls, and tool calls are counted with bounded labels |
+| Local stack | `docker-compose.observability.yml` runs Prometheus and Grafana with a provisioned dashboard |
+| Redacted tracing | Optional LangSmith tracing records safe metadata only, not prompts, chart text, raw patient IDs, or model outputs |
+| Patient history display | Indexed chart history is grouped into readable sections, repeated items are counted, and long history loads use `VITE_HISTORY_TIMEOUT_MS` |
+
+### Validation added
+
+| Test file | Coverage |
+|---|---|
+| `tests/test_observability.py` | `/metrics` auth bypass, patient-ref route redaction, invalid-auth-mode isolation, safe trace inputs |
+| `tests/test_patient_queue.py` | History pagination fetches one extra row only to detect the next page |
 
 ## Next steps
 
@@ -647,5 +674,7 @@ the clinician workflow after approval and tightened the ad hoc chat surface.
    setup and operations hardening remain open.
 14. ~~Add local FHIR write-back/notification stubs~~ - **Done.** Approval records
    notification and FHIR handoff artifacts locally.
-15. Next up: replace local FHIR/reminder stubs with real integrations and
+15. ~~Add local Prometheus/Grafana observability and redacted tracing hooks~~ -
+   **Done.** Managed alerting and hosted operations are still open.
+16. Next up: replace local FHIR/reminder stubs with real integrations and
    harden managed deployment operations.
