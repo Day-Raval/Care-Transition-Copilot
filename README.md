@@ -24,64 +24,117 @@ approved.
 
 ## What It Does
 
-- Scores recent discharges with a Cox survival model served by FastAPI.
+- Presents a clinician work queue for recent discharge episodes, with search,
+  filtering, patient history, risk category, review status, and precomputed
+  care-plan state.
+- Scores 30-day readmission risk through a versioned Cox survival model served
+  by FastAPI, with feature validation generated from the configured model run.
+- Parses synthetic FHIR bundles and HL7v2 ADT discharge messages into discharge
+  episodes, derives risk features, and can trigger proactive assessment
+  generation from intake events.
 - Retrieves section-aware discharge-note context from a patient-scoped ChromaDB
-  vector store.
-- Uses a LangGraph agent flow to draft and critique care-transition plans.
-- Requires clinician approve/reject decisions before report generation or
-  handoff records.
-- Supports local API-key demo mode and OIDC/RBAC mode for deployed user access.
-- Records audit events, decisions, care plans, notifications, FHIR write-back
-  stubs, follow-ups, reminders, metrics, and optional Kafka events.
+  vector store so generated plans are grounded in the selected patient record.
+- Runs a LangGraph workflow that gates by risk, retrieves chart evidence,
+  drafts a care-transition plan, and critiques the draft before clinician
+  review.
+- Requires clinician approve/reject decisions before transition reports,
+  follow-up tracking, reminders, notifications, or FHIR CarePlan write-back
+  records are created.
+- Supports API-key demo auth and OIDC/RBAC mode, with route-level role policy,
+  restricted CORS, request IDs, safe error responses, patient references, and
+  chat guardrails that reject raw patient identifiers.
+- Persists decisions, care plans, audit events, prediction logs, notifications,
+  FHIR write-back records, follow-ups, and reminders through local stores or a
+  Postgres-backed runtime.
+- Publishes Kafka audit and discharge events with idempotent producer settings;
+  the consumer adds retries, duplicate suppression, DLQ routing, backpressure,
+  reconnect handling, and graceful shutdown.
+- Exposes health, dependency readiness, Prometheus metrics, drift reports,
+  fairness audit outputs, LangSmith tracing hooks, and Grafana dashboards for
+  operational review.
+- Uses Redis or in-memory assessment caching, startup/on-demand precompute
+  workers, in-flight request coalescing, bounded API limits, frontend timeouts,
+  and LLM burst pacing to keep the MVP responsive during demos.
 
-## MVP Architecture and Production Enhancements
+## Production-Grade MVP Architecture
 
-The MVP is a local, clinician-in-the-loop demo: a React app calls a FastAPI
-service, FastAPI runs the readmission model and LangGraph care-plan workflow,
-and the workflow retrieves patient-scoped synthetic chart context before
-drafting and critiquing a plan. Optional local services let the same code path
-exercise Postgres, Redis, Kafka, notifications, and observability without
-claiming a production deployment.
+The MVP is built as a production-shaped clinical workflow, not a single script:
+the browser, API, model serving, agent orchestration, retrieval, persistence,
+event streaming, observability, and integration adapters are separated so each
+boundary can be operated, tested, and replaced independently.
 
 ```mermaid
 flowchart LR
-    clinician["Clinician / Care Coordinator"] --> web["React SPA<br/>queue, patient detail, chat, approvals"]
-    web --> auth["API key demo mode<br/>or OIDC/RBAC mode"]
-    auth --> api["FastAPI Service<br/>risk, chat, reports, decisions"]
+    clinician["Clinician / Care Coordinator"] --> web["React SPA<br/>queue, chart context, chat, decisions"]
+    web --> apiEdge["API edge controls<br/>request IDs, CORS, timeouts"]
+    apiEdge --> auth["Auth policy<br/>API key or OIDC/JWKS + RBAC"]
+    auth --> api["FastAPI application<br/>patients, risk, assessment, decisions, reports"]
 
-    api --> model["Local risk model artifact<br/>30-day readmission score"]
-    api --> workflow["LangGraph Workflow<br/>risk gate, retrieval, draft, critique"]
-    workflow --> vector["Local ChromaDB<br/>patient-scoped note chunks"]
-    workflow --> llm["Groq-hosted LLM<br/>reasoning, critique, chat tools"]
+    subgraph ClinicalFlow["Clinician-in-the-loop care workflow"]
+        api --> queue["Risk queue<br/>search, filters, patient_ref only"]
+        api --> assessment["Assessment service<br/>cache, precompute, in-flight de-dupe"]
+        assessment --> workflow["LangGraph orchestration<br/>risk gate -> retrieval -> draft -> critique"]
+        workflow --> retrieval["Patient-scoped retrieval<br/>ChromaDB note chunks"]
+        workflow --> llm["LLM gateway<br/>reasoning, critique, chat tools"]
+        api --> approval["Approval gate<br/>approve/reject before handoff"]
+        approval --> report["Transition report<br/>approved plan + evidence summary"]
+        approval --> followup["Follow-ups, reminders,<br/>notifications, FHIR CarePlan record"]
+    end
 
-    data["Synthetic FHIR / HL7 samples"] --> ingestion["Ingestion and feature scripts"]
-    ingestion --> model
-    ingestion --> vector
+    subgraph DataPlane["Clinical data and model plane"]
+        fhir["Synthetic FHIR bundles"] --> ingestion["FHIR parser<br/>conditions, meds, encounters"]
+        hl7["HL7v2 ADT^A03<br/>or structured discharge event"] --> intake["Realtime intake gateway"]
+        ingestion --> features["Feature pipeline<br/>30-day target + model matrix"]
+        features --> model["Versioned Cox model<br/>risk score + percentile"]
+        ingestion --> chunks["Section-aware note chunking"]
+        chunks --> retrieval
+        intake --> features
+        intake --> assessment
+    end
 
-    api -. optional .-> db["Postgres<br/>decisions, plans, audit"]
-    api -. optional .-> cache["Redis<br/>assessment cache"]
-    api -. optional .-> kafka["Kafka<br/>discharge and audit events"]
-    api -. optional .-> metrics["Prometheus / Grafana<br/>health, latency, drift"]
-    api -. stub .-> notify["Notification provider"]
-    api -. stub .-> ehrWrite["FHIR write-back"]
+    subgraph Runtime["Runtime services"]
+        api --> store["Persistence abstraction<br/>local JSONL/SQLite or Postgres"]
+        assessment --> cache["Redis or memory cache<br/>TTL assessment payloads"]
+        api --> metrics["Prometheus metrics<br/>HTTP, risk, agents, tools, LLM"]
+        metrics --> grafana["Grafana dashboards"]
+        api --> drift["Prediction log + drift report"]
+        api --> audit["Audit log<br/>request-linked events"]
+    end
+
+    subgraph Streaming["Event streaming"]
+        intake --> producer["Kafka producer<br/>idempotent settings, keyed events"]
+        audit --> producer
+        producer --> topics["Kafka topics<br/>discharge episodes, audit events"]
+        topics --> consumer["Kafka consumer<br/>retries, DLQ, backpressure, reconnect"]
+        consumer --> assessment
+        consumer --> store
+        consumer --> dlq["Dead-letter queue"]
+    end
+
+    subgraph Safety["Safety and governance controls"]
+        auth --> roles["Route-level roles<br/>clinician, coordinator, data scientist, admin"]
+        api --> redaction["Patient refs + redaction<br/>no raw patient IDs in UI responses"]
+        api --> guardrails["Chat identifier guardrail<br/>patient-name workflow only"]
+        model --> disclaimer["Model disclaimer<br/>diagnostic score, not calibrated probability"]
+        drift --> fairness["Fairness audit artifacts<br/>explicit inconclusive status"]
+    end
 ```
 
-| Area | MVP today | Production enhancement |
-| --- | --- | --- |
-| Identity and access | API-key demo mode plus OIDC/RBAC support | Enforce enterprise IdP, signed access tokens, route-level RBAC, session policy, and no browser service secrets |
-| API edge | Local FastAPI service with request IDs and safe errors | Add HTTPS, API gateway, WAF/rate limits, restricted CORS, managed secrets, and environment-specific config |
-| Clinical workflow | Risk-gated drafting, critique, and clinician approve/reject controls | Add site-specific policy checks, escalation rules, human review queues, and approved handoff workflows |
-| Data sources | Synthetic Synthea FHIR/HL7 records and generated notes | Connect to approved EHR feeds, validate schemas, de-identify or protect PHI, and define retention/deletion workflows |
-| Persistence | Local files by default; optional Postgres and Redis | Use managed encrypted storage, backups, migrations, audit retention, and cache invalidation controls |
-| Event processing | Optional Kafka topics and idempotent consumer paths | Add production brokers, retries, dead-letter queues, backpressure controls, replay procedures, and runbooks |
-| Model operations | Versioned local artifact, prediction logs, drift report, fairness audit | Calibrate on representative data, validate clinically, monitor drift/fairness, and require model approval before use |
-| Observability | Health checks, Prometheus metrics, and Grafana dashboards locally | Add hosted alerting, SLOs, redacted traces, incident response, and dependency outage monitoring |
-| External integrations | Notification and FHIR write-back stubs | Integrate approved notification, EHR write-back, and LLM providers through security/privacy review |
+The API layer owns authentication, role checks, request correlation, CORS,
+error shaping, patient-reference redaction, and runtime dependency reporting.
+The model layer remains versioned and auditable: predictions are logged,
+drift can be computed against the training reference distribution, and fairness
+results are documented as inconclusive at the current synthetic dataset size.
 
-Current stubs intentionally keep real EHR write-back, automated reminder
-dispatch, managed secrets, hosted alerting, and production deployment outside
-the MVP boundary. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[SECURITY.md](SECURITY.md) for the deeper design.
+The runtime can stay lightweight for local demos or switch to managed-style
+services through environment configuration: Postgres for decisions, care plans,
+audit events, notifications, FHIR write-back records, follow-ups, reminders,
+and prediction logs; Redis for assessment cache; Kafka for discharge/audit
+streams; Prometheus and Grafana for metrics; LangSmith for trace capture; and
+Twilio SMS or a portal-stub channel for notifications. FHIR write-back is
+represented as a persisted CarePlan resource record after clinician approval,
+which keeps the handoff path reviewable without sending real patient data to an
+external EHR.
 
 ## Current Status
 
@@ -94,9 +147,9 @@ the MVP boundary. See [ARCHITECTURE.md](ARCHITECTURE.md) and
 | Agent drafting and critique | Implemented with Groq-hosted models |
 | Clinician React UI | Implemented locally |
 | API-key and OIDC/RBAC auth | Implemented |
-| Postgres, Redis, Kafka, Twilio, Prometheus/Grafana | Optional local integrations |
-| Real EHR write-back and automated reminders | Stubbed/planned |
-| Managed production deployment | Planned |
+| Postgres, Redis, Kafka, Twilio, Prometheus/Grafana | Configurable runtime integrations |
+| FHIR write-back and reminders | Persisted records after clinician approval; no external EHR write is sent |
+| Deployment posture | Local MVP with production-shaped service boundaries |
 
 ## Quick Start
 
