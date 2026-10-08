@@ -4,8 +4,7 @@
 [![JavaScript / JSX](https://img.shields.io/badge/javascript%20%2F%20jsx-frontend-f7df1e.svg)](web/)
 [![CSS](https://img.shields.io/badge/css-styles-663399.svg)](web/src/styles.css)
 [![HTML](https://img.shields.io/badge/html-vite%20entry-e34f26.svg)](web/index.html)
-[![Shell](https://img.shields.io/badge/shell-scripts-4eaa25.svg)](scripts/)
-[![PowerShell](https://img.shields.io/badge/powershell-windows%20scripts-5391fe.svg)](scripts/)
+[![Shell](https://img.shields.io/badge/shell-scripts-4eaa25.svg)]
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Care Transition Copilot is a synthetic-data healthcare AI demo that scores
