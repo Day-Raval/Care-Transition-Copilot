@@ -9,9 +9,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Care Transition Copilot is a synthetic-data healthcare AI demo that scores
-30-day readmission risk, retrieves patient-specific chart context, drafts a
-care-transition plan, and keeps a clinician in control before anything is
-approved.
+30-day readmission risk, uses retrieval-augmented generation (RAG) over
+patient-specific chart context, drafts a care-transition plan, powers a
+RAG-backed clinician chat experience, and keeps a clinician in control before
+anything is approved.
 
 > Research and demo software only. Not for clinical use, not HIPAA validated,
 > and not yet approved for real patient data or protected health information.
@@ -33,10 +34,14 @@ approved.
   episodes, derives risk features, and can trigger proactive assessment
   generation from intake events.
 - Retrieves section-aware discharge-note context from a patient-scoped ChromaDB
-  vector store so generated plans are grounded in the selected patient record.
+  vector store so generated plans and chat answers are grounded in the selected
+  patient record.
 - Runs a LangGraph workflow that gates by risk, retrieves chart evidence,
   drafts a care-transition plan, and critiques the draft before clinician
   review.
+- Provides a RAG-backed web chat that resolves patients by name, calls
+  retrieval/risk tools, answers chart-specific follow-up questions, and avoids
+  exposing raw patient IDs in the browser.
 - Requires clinician approve/reject decisions before transition reports,
   follow-up tracking, reminders, notifications, or FHIR CarePlan write-back
   records are created.
@@ -65,7 +70,7 @@ boundary can be operated, tested, and replaced independently.
 
 ```mermaid
 flowchart LR
-    clinician["Clinician / Care Coordinator"] --> web["React SPA<br/>queue, chart context, chat, decisions"]
+    clinician["Clinician / Care Coordinator"] --> web["React SPA<br/>queue, chart context, RAG chat, decisions"]
     web --> apiEdge["API edge controls<br/>request IDs, CORS, timeouts"]
     apiEdge --> auth["Auth policy<br/>API key or OIDC/JWKS + RBAC"]
     auth --> api["FastAPI application<br/>patients, risk, assessment, decisions, reports"]
@@ -74,8 +79,11 @@ flowchart LR
         api --> queue["Risk queue<br/>search, filters, patient_ref only"]
         api --> assessment["Assessment service<br/>cache, precompute, in-flight de-dupe"]
         assessment --> workflow["LangGraph orchestration<br/>risk gate -> retrieval -> draft -> critique"]
-        workflow --> retrieval["Patient-scoped retrieval<br/>ChromaDB note chunks"]
+        api --> chat["RAG chat endpoint<br/>patient-name resolution + tool calling"]
+        workflow --> retrieval["Patient-scoped RAG retrieval<br/>ChromaDB note chunks"]
+        chat --> retrieval
         workflow --> llm["LLM gateway<br/>reasoning, critique, chat tools"]
+        chat --> llm
         api --> approval["Approval gate<br/>approve/reject before handoff"]
         approval --> report["Transition report<br/>approved plan + evidence summary"]
         approval --> followup["Follow-ups, reminders,<br/>notifications, FHIR CarePlan record"]
@@ -122,9 +130,13 @@ flowchart LR
 
 The API layer owns authentication, role checks, request correlation, CORS,
 error shaping, patient-reference redaction, and runtime dependency reporting.
-The model layer remains versioned and auditable: predictions are logged,
-drift can be computed against the training reference distribution, and fairness
-results are documented as inconclusive at the current synthetic dataset size.
+The RAG layer is shared by the automated care-plan workflow and the web chat:
+both retrieve patient-scoped note chunks before generating answers, while chat
+adds patient-name resolution and tool-calling for risk, medication, and chart
+questions. The model layer remains versioned and auditable: predictions are
+logged, drift can be computed against the training reference distribution, and
+fairness results are documented as inconclusive at the current synthetic dataset
+size.
 
 The runtime can stay lightweight for local demos or switch to managed-style
 services through environment configuration: Postgres for decisions, care plans,
@@ -143,9 +155,9 @@ external EHR.
 | Synthetic FHIR/HL7 ingestion | Implemented |
 | 30-day readmission target and baseline model | Implemented; diagnostic only |
 | Fairness audit | Implemented; currently inconclusive at this dataset size |
-| Retrieval and vector store | Implemented locally |
+| RAG retrieval and vector store | Implemented locally with patient-scoped ChromaDB chunks |
 | Agent drafting and critique | Implemented with Groq-hosted models |
-| Clinician React UI | Implemented locally |
+| Clinician React UI | Implemented locally with queue, approvals, operations, and RAG chat |
 | API-key and OIDC/RBAC auth | Implemented |
 | Postgres, Redis, Kafka, Twilio, Prometheus/Grafana | Configurable runtime integrations |
 | FHIR write-back and reminders | Persisted records after clinician approval; no external EHR write is sent |
