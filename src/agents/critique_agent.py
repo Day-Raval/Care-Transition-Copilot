@@ -25,6 +25,7 @@ import os
 
 from groq import Groq
 
+from src.api.observability import llm_call, safe_trace_inputs, trace_block
 from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 CRITIQUE_MODEL = os.getenv("CRITIQUE_MODEL_NAME", "openai/gpt-oss-20b")
@@ -66,18 +67,34 @@ def critique_plan(patient_context_summary: str, draft_plan: str, risk_context: s
         )
 
     client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
-    response = client.chat.completions.create(
-        model=CRITIQUE_MODEL,
-        messages=[
-            {"role": "system", "content": CRITIQUE_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"{risk_context}ORIGINAL CONTEXT:\n{patient_context_summary}\n\nDRAFT PLAN:\n{draft_plan}",
-            },
-        ],
-        temperature=0.1,  # even lower than reasoning — this is a checking task, not drafting
-    )
-    return response.choices[0].message.content
+    with (
+        llm_call("critique", CRITIQUE_MODEL),
+        trace_block(
+            "Critique LLM",
+            run_type="llm",
+            inputs=safe_trace_inputs(
+                model=CRITIQUE_MODEL,
+                context_chars=len(patient_context_summary),
+                draft_chars=len(draft_plan),
+                has_risk_context=bool(risk_context),
+            ),
+        ) as trace,
+    ):
+        response = client.chat.completions.create(
+            model=CRITIQUE_MODEL,
+            messages=[
+                {"role": "system", "content": CRITIQUE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"{risk_context}ORIGINAL CONTEXT:\n{patient_context_summary}\n\nDRAFT PLAN:\n{draft_plan}",
+                },
+            ],
+            temperature=0.1,  # even lower than reasoning — this is a checking task, not drafting
+        )
+        answer = response.choices[0].message.content
+        if trace:
+            trace.end(outputs=safe_trace_inputs(answer_chars=len(answer or "")))
+    return answer
 
 
 if __name__ == "__main__":

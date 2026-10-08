@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.DEV ? "/api" : (import.meta.env.VITE_API_BASE_U
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 30000);
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const CHAT_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS || 120000);
+const HISTORY_TIMEOUT_MS = Number(import.meta.env.VITE_HISTORY_TIMEOUT_MS || 120000);
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 const CLINICIAN_ID = import.meta.env.VITE_CLINICIAN_ID || "demo_clinician";
 
@@ -47,7 +48,7 @@ async function request(path, options = {}) {
     return res.json();
   } catch (e) {
     if (e.name === "AbortError") {
-      throw errorWithRequestId("Request timed out. The API may still be generating a response.", requestId);
+      throw errorWithRequestId("Request timed out. The API may still be working; try again in a moment.", requestId);
     }
     if (e instanceof TypeError && e.message === "Failed to fetch") {
       throw errorWithRequestId(`Could not reach the API through ${API_BASE}. Start FastAPI with uvicorn and Vite with npm run dev.`, requestId);
@@ -73,7 +74,7 @@ export function searchPatients({ search = "", category = null, limit = 50, offse
 
 export function getPatientHistory(patientRef, { limit = 50, offset = 0 } = {}) {
   const params = new URLSearchParams({ limit, offset });
-  return request(`/patients/${patientPath(patientRef)}/history?${params}`);
+  return request(`/patients/${patientPath(patientRef)}/history?${params}`, { timeoutMs: HISTORY_TIMEOUT_MS });
 }
 
 function patientPath(patientRef) {

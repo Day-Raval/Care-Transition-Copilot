@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, ".")
 from src.retrieval.query_store import get_collection, retrieve_relevant_context
+from src.api.observability import llm_call, safe_trace_inputs, trace_block
 from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -71,14 +72,28 @@ def generate_dynamic_categories(admission_reason: str, risk_info: dict | None = 
 
     try:
         client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": DYNAMIC_QUERY_SYSTEM_PROMPT},
-                {"role": "user", "content": context_line},
-            ],
-            temperature=0.3,
-        )
+        with (
+            llm_call("retrieval_categories", model),
+            trace_block(
+                "Dynamic Retrieval Categories LLM",
+                run_type="llm",
+                inputs=safe_trace_inputs(
+                    model=model,
+                    admission_reason_chars=len(admission_reason),
+                    risk_category=(risk_info or {}).get("risk_category"),
+                ),
+            ) as trace,
+        ):
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": DYNAMIC_QUERY_SYSTEM_PROMPT},
+                    {"role": "user", "content": context_line},
+                ],
+                temperature=0.3,
+            )
+            if trace:
+                trace.end(outputs=safe_trace_inputs(answer_chars=len(response.choices[0].message.content or "")))
         raw = response.choices[0].message.content.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]

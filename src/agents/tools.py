@@ -126,7 +126,13 @@ def dispatch_tool_call(name: str, arguments: dict) -> str:
     """
     import sys
     sys.path.insert(0, ".")
+    from src.api.observability import tool_call
 
+    with tool_call(name):
+        return _dispatch_tool_call(name, arguments)
+
+
+def _dispatch_tool_call(name: str, arguments: dict) -> str:
     if name == "find_patient_by_name":
         import re
 

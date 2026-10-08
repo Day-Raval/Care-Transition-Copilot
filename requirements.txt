@@ -1,4 +1,4 @@
-scikit-survival 
+scikit-survival
 lifelines
 shap
 fairlearn
@@ -18,3 +18,5 @@ requests
 redis
 PyJWT[crypto]
 confluent-kafka
+langsmith
+prometheus-client

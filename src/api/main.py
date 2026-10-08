@@ -60,6 +60,15 @@ load_dotenv()  # must run before /assessment or /chat are ever called —
 
 sys.path.insert(0, ".")
 from src.api.drift_monitor import compute_drift_report, log_prediction
+from src.api.observability import (
+    agent_run,
+    make_metrics_route,
+    record_http_request,
+    record_risk_prediction,
+    route_label,
+    safe_trace_inputs,
+    trace_block,
+)
 from src.api.production import (
     DEFAULT_ACTOR,
     build_transition_report,
@@ -138,6 +147,7 @@ app = FastAPI(
     description="Serves 30-day readmission risk scores from the currently-configured model run.",
     version="0.3.0",
 )
+app.mount("/metrics", make_metrics_route())
 
 allowed_origins = [
     origin.strip()
@@ -161,13 +171,15 @@ _redis_cache = None
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
+    started = time.perf_counter()
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     audit_token = set_audit_request_id(request_id)
     request.state.request_id = request_id
+    response = None
     try:
         path = request.url.path
         method = request.method
-        if path == "/health" or method == "OPTIONS":
+        if path in {"/health", "/metrics"} or path.startswith("/metrics/") or method == "OPTIONS":
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             return response
@@ -177,65 +189,79 @@ async def request_context(request: Request, call_next):
         provided_key = request.headers.get("x-api-key")
         if auth_mode == "oidc" and path == "/predict":
             if not expected_key or provided_key != expected_key:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "Missing or invalid service API key", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
             request.state.principal = {"sub": "risk_model_service", "roles": [], "auth_mode": "service"}
         elif auth_mode == "oidc":
             authorization = request.headers.get("authorization", "")
             scheme, _, token = authorization.partition(" ")
             if scheme.lower() != "bearer" or not token:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "A bearer access token is required", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
             try:
                 request.state.principal = verify_oidc_access_token(token)
             except OIDCConfigurationError as exc:
                 logger.error("OIDC authentication is misconfigured: %s", exc)
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=503,
                     content={"detail": "OIDC authentication is not configured", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
             except (jwt.InvalidTokenError, jwt.PyJWKClientError, ValueError):
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "Invalid or expired bearer access token", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
             allowed_roles = required_roles(method, path)
             if allowed_roles is not None and not allowed_roles.intersection(request.state.principal["roles"]):
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=403,
                     content={"detail": "Your role is not authorized for this action", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
         elif auth_mode == "api_key":
             if not expected_key or provided_key != expected_key:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "Missing or invalid API key", "request_id": request_id},
                     headers={"X-Request-ID": request_id},
                 )
+                return response
             request.state.principal = {
                 "sub": request.headers.get("x-clinician-id", DEFAULT_ACTOR),
                 "roles": ["admin"],
                 "auth_mode": "api_key",
             }
         else:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=503,
                 content={"detail": "AUTH_MODE must be 'api_key' or 'oidc'", "request_id": request_id},
                 headers={"X-Request-ID": request_id},
             )
+            return response
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
     finally:
+        status_code = getattr(response, "status_code", 500)
+        record_http_request(
+            request.method,
+            route_label(request),
+            status_code,
+            time.perf_counter() - started,
+        )
         reset_audit_request_id(audit_token)
 
 
@@ -601,8 +627,21 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
     from src.agents.orchestrator import LOW_RISK_CATEGORY, build_graph
 
     try:
-        graph = build_graph()
-        result = graph.invoke({"patient_id": patient_id, "discharge_ts": discharge_ts})
+        with (
+            agent_run("assessment"),
+            trace_block(
+                "Generate Assessment",
+                inputs=safe_trace_inputs(
+                    patient_ref=_patient_ref(patient_id),
+                    discharge_ts=discharge_ts,
+                    model_run_id=_state.get("run_id"),
+                ),
+            ) as trace,
+        ):
+            graph = build_graph()
+            result = graph.invoke({"patient_id": patient_id, "discharge_ts": discharge_ts})
+            if trace:
+                trace.end(outputs=safe_trace_inputs(risk_category=result.get("risk_category")))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
@@ -731,6 +770,7 @@ def load_production_model():
         category = _categorize(percentile)
 
         log_prediction(feature_values=payload, risk_score=risk_score, model_run_id=cfg.production_run_id)
+        record_risk_prediction(category)
 
         return RiskPrediction(
             risk_score=round(risk_score, 4),
@@ -1191,7 +1231,23 @@ def chat(request: ChatRequest):
             question = f"For patient {request.patient_name}, {question}"
 
     try:
-        result = _chat_fast_path(request.question, resolved) or ask(question)
+        with (
+            agent_run("chat"),
+            trace_block(
+                "Patient Chat",
+                inputs=safe_trace_inputs(
+                    has_patient_name=bool(request.patient_name),
+                    patient_resolved=bool(resolved),
+                    question_chars=len(request.question),
+                ),
+            ) as trace,
+        ):
+            result = _chat_fast_path(request.question, resolved) or ask(question)
+            if trace:
+                trace.end(outputs=safe_trace_inputs(
+                    tool_call_count=len(result.get("tool_calls", [])),
+                    answer_chars=len(result.get("answer", "")),
+                ))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

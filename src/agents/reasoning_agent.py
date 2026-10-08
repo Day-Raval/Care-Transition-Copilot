@@ -27,6 +27,7 @@ import os
 
 from groq import Groq
 
+from src.api.observability import llm_call, safe_trace_inputs, trace_block
 from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -61,15 +62,26 @@ def draft_care_plan(patient_context_summary: str) -> str:
         )
 
     client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
-    response = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": REASONING_SYSTEM_PROMPT},
-            {"role": "user", "content": patient_context_summary},
-        ],
-        temperature=0.2,  # low — this is a grounded drafting task, not creative writing
-    )
-    return response.choices[0].message.content
+    with (
+        llm_call("reasoning", GROQ_MODEL),
+        trace_block(
+            "Reasoning LLM",
+            run_type="llm",
+            inputs=safe_trace_inputs(model=GROQ_MODEL, context_chars=len(patient_context_summary)),
+        ) as trace,
+    ):
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": REASONING_SYSTEM_PROMPT},
+                {"role": "user", "content": patient_context_summary},
+            ],
+            temperature=0.2,  # low — this is a grounded drafting task, not creative writing
+        )
+        answer = response.choices[0].message.content
+        if trace:
+            trace.end(outputs=safe_trace_inputs(answer_chars=len(answer or "")))
+    return answer
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ from src.agents.critique_agent import critique_plan
 from src.agents.reasoning_agent import draft_care_plan
 from src.agents.retrieval_agent import generate_dynamic_categories, retrieve_patient_context
 from src.agents.risk_tool import assess_risk
+from src.api.observability import safe_trace_inputs, trace_block
 
 LOW_RISK_CATEGORY = "low"  # matches src/api/main.py's _categorize()
 
@@ -63,7 +64,10 @@ def _risk_context_line(state: PipelineState) -> str:
 
 
 def risk_assessment_node(state: PipelineState) -> dict:
-    result = assess_risk(state["patient_id"], state.get("discharge_ts"))
+    with trace_block("Risk Assessment", run_type="tool", inputs=safe_trace_inputs(has_discharge_ts=bool(state.get("discharge_ts")))) as trace:
+        result = assess_risk(state["patient_id"], state.get("discharge_ts"))
+        if trace:
+            trace.end(outputs=safe_trace_inputs(risk_category=result.get("risk_category")))
     return {
         "patient_name": result["patient_name"],
         "risk_score": result["risk_score"],
@@ -95,11 +99,18 @@ def low_risk_summary_node(state: PipelineState) -> dict:
 
 
 def retrieval_node(state: PipelineState) -> dict:
-    categories = generate_dynamic_categories(
-        admission_reason=state["admission_reason"],
-        risk_info={"risk_category": state["risk_category"]},
-    )
-    context = retrieve_patient_context(state["patient_id"], categories=categories)
+    with trace_block("Retrieve Patient Context", run_type="retriever", inputs=safe_trace_inputs(risk_category=state["risk_category"])) as trace:
+        categories = generate_dynamic_categories(
+            admission_reason=state["admission_reason"],
+            risk_info={"risk_category": state["risk_category"]},
+        )
+        context = retrieve_patient_context(state["patient_id"], categories=categories)
+        if trace:
+            trace.end(outputs=safe_trace_inputs(
+                categories=len(categories),
+                retrieved_items=len(context.items),
+                no_match_count=len(context.categories_with_no_match),
+            ))
     return {
         "patient_context_summary": context.summary_text(),
         "categories_with_no_match": context.categories_with_no_match,
@@ -107,16 +118,29 @@ def retrieval_node(state: PipelineState) -> dict:
 
 
 def reasoning_node(state: PipelineState) -> dict:
-    plan = draft_care_plan(_risk_context_line(state) + state["patient_context_summary"])
+    with trace_block("Draft Care Plan", inputs=safe_trace_inputs(
+        risk_category=state["risk_category"],
+        context_chars=len(state["patient_context_summary"]),
+    )) as trace:
+        plan = draft_care_plan(_risk_context_line(state) + state["patient_context_summary"])
+        if trace:
+            trace.end(outputs=safe_trace_inputs(plan_chars=len(plan)))
     return {"draft_plan": plan}
 
 
 def critique_node(state: PipelineState) -> dict:
-    notes = critique_plan(
-        state["patient_context_summary"],
-        state["draft_plan"],
-        risk_context=_risk_context_line(state),
-    )
+    with trace_block("Critique Care Plan", inputs=safe_trace_inputs(
+        risk_category=state["risk_category"],
+        context_chars=len(state["patient_context_summary"]),
+        draft_chars=len(state["draft_plan"]),
+    )) as trace:
+        notes = critique_plan(
+            state["patient_context_summary"],
+            state["draft_plan"],
+            risk_context=_risk_context_line(state),
+        )
+        if trace:
+            trace.end(outputs=safe_trace_inputs(critique_chars=len(notes)))
     return {"critique_notes": notes, "final_summary": state["draft_plan"]}
 
 

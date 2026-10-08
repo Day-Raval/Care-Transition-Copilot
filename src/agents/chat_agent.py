@@ -29,6 +29,7 @@ from groq import Groq
 
 sys.path.insert(0, ".")
 from src.agents.tools import TOOLS, dispatch_tool_call
+from src.api.observability import llm_call, safe_trace_inputs, trace_block
 from src.utils.runtime import LLM_TIMEOUT_SECONDS
 
 CHAT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -69,13 +70,31 @@ def ask(question: str) -> dict:
     tool_call_log = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = client.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            temperature=0.2,
-        )
+        with (
+            llm_call("chat", CHAT_MODEL),
+            trace_block(
+                "Chat LLM",
+                run_type="llm",
+                inputs=safe_trace_inputs(
+                    model=CHAT_MODEL,
+                    round=len(tool_call_log) + 1,
+                    message_count=len(messages),
+                ),
+            ) as trace,
+        ):
+            response = client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                temperature=0.2,
+            )
+            if trace:
+                message = response.choices[0].message
+                trace.end(outputs=safe_trace_inputs(
+                    answer_chars=len(message.content or ""),
+                    requested_tools=len(message.tool_calls or []),
+                ))
         message = response.choices[0].message
 
         if not message.tool_calls:

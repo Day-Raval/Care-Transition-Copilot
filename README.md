@@ -697,12 +697,13 @@ the FastAPI log stream or `API_LOG_TAIL_LINES=200` to show more startup history.
 Set matching `API_KEY` and `VITE_API_KEY` values so browser requests can pass
 the required `X-API-Key` header. Optional runtime variables include
 `LLM_TIMEOUT_SECONDS`, `RISK_API_TIMEOUT_SECONDS`, `CACHE_TTL_SECONDS`,
-`REDIS_URL`, and `VITE_REQUEST_TIMEOUT_MS`. When
+`REDIS_URL`, `VITE_REQUEST_TIMEOUT_MS`, and `VITE_HISTORY_TIMEOUT_MS`. When
 `REDIS_URL` is set, assessment cache entries are stored in Redis with the same
 `CACHE_TTL_SECONDS`; if Redis is unavailable, the API falls back to its
 in-process cache. Assessment requests can use a longer frontend timeout through
 `VITE_ASSESSMENT_TIMEOUT_MS` because retrieval and care-plan drafting can take
-longer than ordinary API reads.
+longer than ordinary API reads; indexed chart history uses
+`VITE_HISTORY_TIMEOUT_MS` for the same reason.
 
 Local demo persistence uses JSONL files plus SQLite. To route decisions, saved
 care plans, and audit events through a SQL database instead, set
