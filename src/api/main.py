@@ -43,6 +43,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import defaultdict, deque
 from datetime import datetime
 from typing import Any
 
@@ -167,6 +168,59 @@ app.add_middleware(
 
 _state = {}
 _redis_cache = None
+_rate_limit_lock = threading.Lock()
+_rate_limit_hits: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _max_request_bytes() -> int:
+    return max(1, _env_int("MAX_REQUEST_BYTES", 1_000_000))
+
+
+def _rate_limit_for_path(path: str) -> int | None:
+    if path == "/chat":
+        return _env_int("RATE_LIMIT_CHAT_PER_MINUTE", 20)
+    if path == "/patients/{patient_ref}/assessment":
+        return _env_int("RATE_LIMIT_ASSESSMENT_PER_MINUTE", 30)
+    if path in {"/patients/search", "/intake/hl7-adt", "/intake/discharge-event"}:
+        return _env_int("RATE_LIMIT_WRITE_PER_MINUTE", 60)
+    return None
+
+
+def _rate_limit_path(path: str) -> str:
+    if path.startswith("/patients/") and path.endswith("/assessment"):
+        return "/patients/{patient_ref}/assessment"
+    return path
+
+
+def _rate_limit_key(request: Request, path: str) -> str:
+    principal = getattr(request.state, "principal", {})
+    actor = principal.get("sub")
+    if not actor:
+        actor = request.client.host if request.client else "unknown"
+    return f"{path}:{actor}"
+
+
+def _rate_limited(key: str, limit: int, now: float | None = None) -> bool:
+    if limit <= 0:
+        return False
+    window_seconds = max(1, _env_int("RATE_LIMIT_WINDOW_SECONDS", 60))
+    current = time.monotonic() if now is None else now
+    cutoff = current - window_seconds
+    with _rate_limit_lock:
+        hits = _rate_limit_hits[key]
+        while hits and hits[0] <= cutoff:
+            hits.popleft()
+        if len(hits) >= limit:
+            return True
+        hits.append(current)
+        return False
 
 
 @app.middleware("http")
@@ -179,6 +233,18 @@ async def request_context(request: Request, call_next):
     try:
         path = request.url.path
         method = request.method
+        content_length = request.headers.get("content-length")
+        try:
+            request_bytes = int(content_length) if content_length else 0
+        except ValueError:
+            request_bytes = 0
+        if method in {"POST", "PUT", "PATCH"} and request_bytes > _max_request_bytes():
+            response = JSONResponse(
+                status_code=413,
+                content={"detail": "Request body is too large", "request_id": request_id},
+                headers={"X-Request-ID": request_id},
+            )
+            return response
         if path in {"/health", "/metrics"} or path.startswith("/metrics/") or method == "OPTIONS":
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
@@ -249,6 +315,15 @@ async def request_context(request: Request, call_next):
                 status_code=503,
                 content={"detail": "AUTH_MODE must be 'api_key' or 'oidc'", "request_id": request_id},
                 headers={"X-Request-ID": request_id},
+            )
+            return response
+        limit_path = _rate_limit_path(path)
+        limit = _rate_limit_for_path(limit_path)
+        if limit is not None and _rate_limited(_rate_limit_key(request, limit_path), limit):
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please wait and try again.", "request_id": request_id},
+                headers={"X-Request-ID": request_id, "Retry-After": str(_env_int("RATE_LIMIT_WINDOW_SECONDS", 60))},
             )
             return response
         response = await call_next(request)

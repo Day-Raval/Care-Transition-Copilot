@@ -116,8 +116,8 @@ class FullAssessment(BaseModel):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question: str
-    patient_name: str | None = None
+    question: str = Field(..., min_length=1, max_length=2000)
+    patient_name: str | None = Field(default=None, max_length=120)
 
 
 class ChatToolCall(BaseModel):
@@ -212,16 +212,16 @@ class PrecomputeStatus(BaseModel):
 
 
 class HL7IntakeRequest(BaseModel):
-    raw_message: str = Field(..., min_length=5, description="Raw pipe-delimited HL7v2 message (ADT^A03)")
+    raw_message: str = Field(..., min_length=5, max_length=200_000, description="Raw pipe-delimited HL7v2 message (ADT^A03)")
 
 
 class DischargeEventTriggerRequest(BaseModel):
-    patient_id: str = Field(..., description="Patient ID / MRN")
-    discharge_ts: str | None = Field(default=None, description="Discharge timestamp (ISO or HL7 format)")
-    admit_ts: str | None = Field(default=None, description="Admit timestamp")
-    encounter_id: str | None = Field(default=None, description="Encounter ID")
-    patient_name: str | None = Field(default=None, description="Patient name")
-    admission_reason: str | None = Field(default=None, description="Primary diagnosis or admission reason")
+    patient_id: str = Field(..., max_length=120, description="Patient ID / MRN")
+    discharge_ts: str | None = Field(default=None, max_length=40, description="Discharge timestamp (ISO or HL7 format)")
+    admit_ts: str | None = Field(default=None, max_length=40, description="Admit timestamp")
+    encounter_id: str | None = Field(default=None, max_length=120, description="Encounter ID")
+    patient_name: str | None = Field(default=None, max_length=120, description="Patient name")
+    admission_reason: str | None = Field(default=None, max_length=500, description="Primary diagnosis or admission reason")
     fhir_bundle: dict | None = Field(default=None, description="Optional embedded FHIR bundle with clinical resources")
 
 

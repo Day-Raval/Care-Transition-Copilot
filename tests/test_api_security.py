@@ -30,6 +30,8 @@ class OIDCAuthenticationTest(unittest.TestCase):
         )
         self.env.start()
         self.addCleanup(self.env.stop)
+        main._rate_limit_hits.clear()
+        self.addCleanup(main._rate_limit_hits.clear)
         security._jwks_client.cache_clear()
 
     def make_token(self, roles):
@@ -136,3 +138,31 @@ class OIDCAuthenticationTest(unittest.TestCase):
         self.assertEqual(client.post("/predict", json={}).status_code, 401)
         response = client.post("/predict", headers={"X-API-Key": "service-key"}, json={})
         self.assertNotEqual(response.status_code, 401)
+
+    def test_large_request_body_is_rejected_before_handler(self):
+        client = TestClient(main.app)
+        with patch.dict(os.environ, {"MAX_REQUEST_BYTES": "10"}):
+            response = client.post("/chat", json={"question": "x" * 100})
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("request_id", response.json())
+
+    def test_expensive_routes_are_rate_limited_per_principal(self):
+        client = TestClient(main.app)
+        token = self.make_token(["care_coordinator"])
+        with (
+            patch.dict(os.environ, {"RATE_LIMIT_WRITE_PER_MINUTE": "1", "RATE_LIMIT_WINDOW_SECONDS": "60"}),
+            self.configure_jwks(),
+        ):
+            first = client.post(
+                "/patients/search",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"search": "heart"},
+            )
+            second = client.post(
+                "/patients/search",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"search": "heart"},
+            )
+        self.assertNotEqual(first.status_code, 429)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.headers["retry-after"], "60")

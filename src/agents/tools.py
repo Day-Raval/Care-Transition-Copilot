@@ -171,6 +171,7 @@ def _dispatch_tool_call(name: str, arguments: dict) -> str:
         results = retrieve_relevant_context(collection, arguments["patient_id"], arguments["query"])
         if results is None:
             return "No relevant documentation found for this query."
-        return "\n".join(f"[{r['section']}] {r['text']}" for r in results)
+        chart_text = "\n".join(f"[{r['section']}] {r['text']}" for r in results)
+        return f"BEGIN_CHART_CONTEXT\n{chart_text}\nEND_CHART_CONTEXT"
 
     raise ValueError(f"Unknown tool: {name}")
