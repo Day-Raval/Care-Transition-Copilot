@@ -56,7 +56,7 @@ approved.
   workers, in-flight request coalescing, bounded API limits, frontend timeouts,
   and LLM burst pacing to keep the MVP responsive during demos.
 
-## Production-Grade MVP Architecture
+## MVP Architecture
 
 The MVP is built as a production-shaped clinical workflow, not a single script:
 the browser, API, model serving, agent orchestration, retrieval, persistence,
