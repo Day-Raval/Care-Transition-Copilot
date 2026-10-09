@@ -41,6 +41,7 @@ from src.api.production import (  # noqa: E402
     _decisions_table,
     _ensure_database_schema,
     _model_predictions_table,
+    sqlalchemy_database_url,
 )
 
 import os  # noqa: E402
@@ -179,7 +180,7 @@ def main() -> int:
         print("DATABASE_URL is not set. Check your .env file.")
         return 1
 
-    engine = create_engine(DATABASE_URL, future=True)
+    engine = create_engine(sqlalchemy_database_url(DATABASE_URL), future=True)
     try:
         _ensure_database_schema(engine)
         print("Schema ensured: care_plan_decisions, care_plans, audit_events, model_predictions")

@@ -108,6 +108,39 @@ class PatientQueueSearchTest(unittest.TestCase):
         self.assertEqual(first_page.items[0].text, "Later medication history")
         self.assertEqual(second_page.items[0].text, "Earlier condition history")
 
+    def test_history_replaces_synthea_first_name_with_display_name(self):
+        patient_id = "patient-74"
+        main._state["queue_df"].loc[
+            main._state["queue_df"]["patient_id"] == patient_id,
+            "patient_name",
+        ] = "Duane703 Gislason620"
+        records = [
+            {
+                "id": "chunk-1",
+                "document": "Duane703 is a 62 year-old male.",
+                "metadata": {
+                    "patient_id": patient_id,
+                    "discharge_ts": "2026-08-06",
+                    "section_name": "History of Present Illness",
+                },
+            },
+        ]
+
+        class FakeCollection:
+            def get(self, where=None, include=None, limit=None, offset=0):
+                selected = [record for record in records if record["metadata"]["patient_id"] == where["patient_id"]]
+                selected = selected[offset:offset + limit]
+                return {
+                    "ids": [record["id"] for record in selected],
+                    "documents": [record["document"] for record in selected],
+                    "metadatas": [record["metadata"] for record in selected],
+                }
+
+        with patch("src.retrieval.query_store.get_collection", return_value=FakeCollection()):
+            result = main.patient_history(main._patient_ref(patient_id), limit=1, offset=0)
+
+        self.assertEqual(result.items[0].text, "Duane Gislason is a 62 year-old male.")
+
 
 if __name__ == "__main__":
     unittest.main()

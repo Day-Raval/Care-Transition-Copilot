@@ -28,6 +28,7 @@ from src.api.production import (  # noqa: E402
     _audit_events_table,
     _care_plans_table,
     _decisions_table,
+    sqlalchemy_database_url,
 )
 
 import os  # noqa: E402
@@ -135,7 +136,7 @@ def main() -> int:
         print("DATABASE_URL is not set. Check your .env file.")
         return 1
 
-    engine = create_engine(DATABASE_URL, future=True)
+    engine = create_engine(sqlalchemy_database_url(DATABASE_URL), future=True)
     try:
         print("Postgres table counts:")
         print_table_counts(engine)

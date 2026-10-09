@@ -501,6 +501,22 @@ def _normalize_patient_name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", without_digits)).strip()
 
 
+def _display_patient_name(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"\d+", "", str(value))).strip()
+
+
+def _history_text_with_display_name(text: str, patient_name: str) -> str:
+    display_name = _display_patient_name(patient_name)
+    if not display_name:
+        return text
+    raw_name = str(patient_name)
+    cleaned = text.replace(raw_name, display_name)
+    raw_first_name = raw_name.split()[0] if raw_name.split() else ""
+    if raw_first_name and re.search(r"\d", raw_first_name):
+        cleaned = re.sub(rf"\b{re.escape(raw_first_name)}\b", display_name, cleaned)
+    return cleaned
+
+
 def _resolve_patient_name(name: str) -> dict[str, str] | None:
     if not _state or "queue_df" not in _state:
         return None
@@ -1012,6 +1028,9 @@ def patient_history(patient_ref: str, limit: int = 50, offset: int = 0):
     from src.retrieval.query_store import get_collection
 
     collection = get_collection()
+    queue_rows = _state["queue_df"]
+    patient_rows = queue_rows[queue_rows["patient_id"].astype(str) == patient_id]
+    patient_name = str(patient_rows.iloc[0]["patient_name"]) if not patient_rows.empty else ""
     page_records = collection.get(
         where={"patient_id": patient_id},
         include=["documents", "metadatas"],
@@ -1023,7 +1042,7 @@ def patient_history(patient_ref: str, limit: int = 50, offset: int = 0):
         PatientHistoryItem(
             discharge_ts=str(metadata.get("discharge_ts", "")),
             section_name=str(metadata.get("section_name", "Chart note")),
-            text=document,
+            text=_history_text_with_display_name(document, patient_name),
         )
         for document, metadata in zip(
             page_records["documents"][:limit], page_records["metadatas"][:limit]

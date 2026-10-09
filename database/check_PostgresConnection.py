@@ -1,7 +1,7 @@
 """Verify connectivity to the PostgreSQL database defined in .env.
 
 Usage:
-    python database/check_connection.py
+    python database/check_PostgresConnection.py
 """
 from __future__ import annotations
 
@@ -14,8 +14,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 # Load .env from the project root regardless of the caller's cwd
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
+
+from src.api.production import sqlalchemy_database_url  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -25,7 +29,7 @@ def check_connection() -> bool:
         print("DATABASE_URL is not set. Check your .env file.")
         return False
 
-    engine = create_engine(DATABASE_URL)
+    engine = create_engine(sqlalchemy_database_url(DATABASE_URL))
     try:
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version()")).scalar_one()

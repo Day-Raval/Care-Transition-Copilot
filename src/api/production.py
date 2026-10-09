@@ -183,10 +183,18 @@ def use_database() -> bool:
     return True
 
 
+def sqlalchemy_database_url(url: str) -> str:
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    if url.startswith("postgresql+psycopg://"):
+        return url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    return url
+
+
 def _db_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(os.environ["DATABASE_URL"], future=True)
+        _engine = create_engine(sqlalchemy_database_url(os.environ["DATABASE_URL"]), future=True)
     return _engine
 
 
