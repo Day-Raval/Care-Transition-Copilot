@@ -505,12 +505,18 @@ def _display_patient_name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"\d+", "", str(value))).strip()
 
 
+def _strip_no_known_allergy_boilerplate(text: str) -> str:
+    cleaned = re.sub(r"\bAllergies:\s*No Known Allergies\.?\s*", "", str(text), flags=re.I)
+    return re.sub(r":\s*[-–—]\s*", ": ", cleaned)
+
+
 def _history_text_with_display_name(text: str, patient_name: str) -> str:
     display_name = _display_patient_name(patient_name)
+    cleaned = _strip_no_known_allergy_boilerplate(text)
     if not display_name:
-        return text
+        return cleaned
     raw_name = str(patient_name)
-    cleaned = text.replace(raw_name, display_name)
+    cleaned = cleaned.replace(raw_name, display_name)
     raw_first_name = raw_name.split()[0] if raw_name.split() else ""
     if raw_first_name and re.search(r"\d", raw_first_name):
         cleaned = re.sub(rf"\b{re.escape(raw_first_name)}\b", display_name, cleaned)
@@ -540,7 +546,7 @@ def _medication_items_from_context(results: list[dict[str, Any]]) -> list[str]:
     items = []
     seen = set()
     for result in results:
-        text = re.sub(r"Allergies:\s*No Known Allergies\.?\.?\s*", "", str(result.get("text", "")), flags=re.I)
+        text = _strip_no_known_allergy_boilerplate(str(result.get("text", "")))
         text = re.sub(r"^.*?medications?:\s*", "", text, flags=re.I | re.S)
         text = re.sub(r"^The patient was prescribed the following medications:\s*", "", text, flags=re.I)
         for part in re.split(r"\n|;", text):

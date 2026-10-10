@@ -100,6 +100,25 @@ MIN_CHUNK_WORDS = 8  # below this, a chunk carries too little distinctive
                        # were winning against genuinely relevant longer
                        # chunks across multiple unrelated queries
 
+
+def _is_boilerplate_allergy_section(section_name: str, section_text: str) -> bool:
+    return (
+        section_name.strip().casefold() == "allergies"
+        and re.fullmatch(r"\s*No Known Allergies\.?\s*", section_text, flags=re.I) is not None
+    )
+
+
+def _is_boilerplate_medications_section(section_name: str, section_text: str) -> bool:
+    return (
+        section_name.strip().casefold() == "medications"
+        and re.fullmatch(r"\s*No Active Medications\.?\s*", section_text, flags=re.I) is not None
+    )
+
+
+def _keep_short_section_separate(section_name: str) -> bool:
+    return section_name.strip().casefold() in {"chief complaint"}
+
+
 def chunk_note_record(record, chunk_size=CHUNK_SIZE_WORDS, overlap=CHUNK_OVERLAP_WORDS):
     text = record.get("note_text") or ""
     sections = split_into_sections(text)
@@ -114,6 +133,11 @@ def chunk_note_record(record, chunk_size=CHUNK_SIZE_WORDS, overlap=CHUNK_OVERLAP
     merged_sections = []
     pending_prefix = ""
     for section_name, section_text in sections:
+        if _is_boilerplate_allergy_section(section_name, section_text) or _is_boilerplate_medications_section(section_name, section_text):
+            continue
+        if _keep_short_section_separate(section_name):
+            merged_sections.append((section_name, section_text))
+            continue
         if len(section_text.split()) < MIN_CHUNK_WORDS:
             pending_prefix += f"{section_name}: {section_text}. "
             continue

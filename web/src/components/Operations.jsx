@@ -6,9 +6,6 @@ import {
   getFollowUps,
   getHealth,
   getModelInfo,
-  getNotifications,
-  getPrecomputeStatus,
-  getReminders,
 } from "../api.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
@@ -35,36 +32,11 @@ function resultError(result) {
   return result.status === "rejected" ? result.reason.message : null;
 }
 
-function CheckList({ checks }) {
-  if (!checks) return null;
-  return (
-    <div className="ops-checks">
-      {Object.entries(checks).map(([name, ok]) => (
-        <span className={`pill ${ok ? "pill-ok" : "pill-warn"}`} key={name}>
-          {name.replaceAll("_", " ")}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function StatusCard({ title, status, detail }) {
-  return (
-    <div className="ops-status-card">
-      <div className="event-title">{title}</div>
-      <div className="event-meta">{status}</div>
-      {detail && <div className="event-meta">{detail}</div>}
-    </div>
-  );
-}
-
 export default function Operations() {
   const [events, setEvents] = useState([]);
-  const [notifications, setNotifications] = useState([]);
   const [writebacks, setWritebacks] = useState([]);
   const [followUps, setFollowUps] = useState([]);
-  const [reminders, setReminders] = useState([]);
-  const [system, setSystem] = useState({ health: null, model: null, drift: null, precompute: null, errors: [] });
+  const [system, setSystem] = useState({ health: null, model: null, drift: null, errors: [] });
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -74,33 +46,25 @@ export default function Operations() {
     setError(null);
     Promise.allSettled([
       getAuditEvents({ limit: 100, requestId: filters.requestId ?? requestId }),
-      getNotifications(50),
       getFhirWritebacks(50),
       getFollowUps(50),
-      getReminders(50),
       getHealth(),
       getModelInfo(),
       getDriftReport(),
-      getPrecomputeStatus(),
     ])
-      .then(([auditResult, notificationResult, writebackResult, followUpResult, reminderResult, healthResult, modelResult, driftResult, precomputeResult]) => {
+      .then(([auditResult, writebackResult, followUpResult, healthResult, modelResult, driftResult]) => {
         setEvents(resultValue(auditResult, []));
-        setNotifications(resultValue(notificationResult, []));
         setWritebacks(resultValue(writebackResult, []));
         setFollowUps(resultValue(followUpResult, []));
-        setReminders(resultValue(reminderResult, []));
         setSystem({
           health: resultValue(healthResult),
           model: resultValue(modelResult),
           drift: resultValue(driftResult),
-          precompute: resultValue(precomputeResult),
-          errors: [healthResult, modelResult, driftResult, precomputeResult].map(resultError).filter(Boolean),
+          errors: [healthResult, modelResult, driftResult].map(resultError).filter(Boolean),
         });
         const primaryError = resultError(auditResult)
-          || resultError(notificationResult)
           || resultError(writebackResult)
-          || resultError(followUpResult)
-          || resultError(reminderResult);
+          || resultError(followUpResult);
         if (primaryError) setError(primaryError);
       })
       .finally(() => setLoading(false));
@@ -113,7 +77,7 @@ export default function Operations() {
   return (
     <div className="operations-layout">
       <div className="panel">
-        <h2>Audit trail</h2>
+        <h2>Recent audit events</h2>
         <p className="panel-subtitle">Recent API workflow events with patient and request trace IDs</p>
 
         <div className="filter-row">
@@ -159,8 +123,8 @@ export default function Operations() {
 
       <div className="ops-stack">
         <div className="panel">
-          <h2>System visibility</h2>
-          <p className="panel-subtitle">Runtime checks, model metadata, and drift status</p>
+          <h2>System status</h2>
+          <p className="panel-subtitle">Runtime readiness</p>
 
           {loading && <LoadingState>Loading status...</LoadingState>}
           {!loading && system.health && (
@@ -168,33 +132,25 @@ export default function Operations() {
               <div className={`decision-badge ${system.health.status === "ok" ? "approved" : "rejected"}`}>
                 API {system.health.status}
               </div>
-              <div className="ops-status-grid">
-                <StatusCard
-                  title="Kafka dependency"
-                  status={system.health.dependencies?.kafka?.ready ? "ready" : "not ready"}
-                  detail={system.health.dependencies?.kafka?.mode || system.health.kafka_consumer?.status}
-                />
-                <StatusCard
-                  title="Kafka consumer"
-                  status={system.health.kafka_consumer?.status || "unknown"}
-                  detail={system.health.kafka_consumer?.topic || ""}
-                />
-                <StatusCard
-                  title="Notifications"
-                  status={system.health.dependencies?.notifications?.ready ? "ready" : "not ready"}
-                  detail={system.health.dependencies?.notifications?.channel || system.health.dependencies?.notifications?.mode}
-                />
-                {system.precompute && (
-                  <StatusCard
-                    title="Precompute"
-                    status={system.precompute.status}
-                    detail={`${system.precompute.completed} completed, ${system.precompute.skipped} skipped, ${system.precompute.failed} failed`}
-                  />
-                )}
+              <div className="ops-checks">
+                {["processed_dataset", "vector_store", "database_connectivity"].map((name) => (
+                  <span
+                    className={`pill ${system.health.dependencies?.checks?.[name] ? "pill-ok" : "pill-warn"}`}
+                    key={name}
+                  >
+                    {name.replaceAll("_", " ")}
+                  </span>
+                ))}
               </div>
-              <CheckList checks={system.health.dependencies?.checks} />
             </>
           )}
+          {!loading && system.errors.map((message) => (
+            <p className="muted" key={message}>{message}</p>
+          ))}
+        </div>
+
+        <div className="panel">
+          <h2>Model status</h2>
           {!loading && system.model && (
             <div className="event-row">
               <div className="event-title">{system.model.model_type} | {system.model.model_run_id}</div>
@@ -204,22 +160,23 @@ export default function Operations() {
               <div className="event-meta">{system.model.features?.length || 0} model features</div>
             </div>
           )}
-          {!loading && system.drift && (
-            <div className="event-row">
-              <div className="event-title">Drift: {system.drift.status}</div>
-              <div className="event-meta">{system.drift.n_recent_predictions} recent predictions</div>
-            </div>
-          )}
-          {!loading && system.errors.map((message) => (
-            <p className="muted" key={message}>{message}</p>
-          ))}
         </div>
 
         <div className="panel">
-          <h2>FHIR write-backs</h2>
-          <p className="panel-subtitle">Approved-plan CarePlan resources recorded by the local stub</p>
+          <h2>Drift status</h2>
+          {!loading && system.drift && (
+            <div className="event-row">
+              <div className="event-title">{system.drift.status}</div>
+              <div className="event-meta">{system.drift.n_recent_predictions} recent predictions</div>
+            </div>
+          )}
+        </div>
 
-          {!loading && !error && writebacks.length === 0 && <EmptyState>No write-backs recorded yet.</EmptyState>}
+        <div className="panel">
+          <h2>CarePlan records</h2>
+          <p className="panel-subtitle">Approved-plan records created after clinician decisions</p>
+
+          {!loading && !error && writebacks.length === 0 && <EmptyState>No CarePlan records yet.</EmptyState>}
           {!loading && !error && writebacks.length > 0 && (
             <div className="event-list">
               {writebacks.map((writeback, index) => (
@@ -252,50 +209,6 @@ export default function Operations() {
                     {followUp.actor && ` | ${followUp.actor}`}
                   </div>
                   {followUp.note && <p className="muted">{followUp.note}</p>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="panel">
-          <h2>Reminders</h2>
-          <p className="panel-subtitle">Scheduled notification reminders for follow-up work</p>
-
-          {!loading && !error && reminders.length === 0 && <EmptyState>No reminders scheduled yet.</EmptyState>}
-          {!loading && !error && reminders.length > 0 && (
-            <div className="event-list">
-              {reminders.map((reminder, index) => (
-                <div className="event-row" key={`${reminder.timestamp}-${index}`}>
-                  <div className="event-title">{reminder.status}: {prettyDate(reminder.remind_at)}</div>
-                  <div className="event-meta">
-                    {reminder.patient_ref && `patient ${shortId(reminder.patient_ref)}`}
-                    {reminder.actor && ` | ${reminder.actor}`}
-                  </div>
-                  {reminder.message && <p className="muted">{reminder.message}</p>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="panel">
-          <h2>Notifications</h2>
-          <p className="panel-subtitle">Approved-plan handoffs recorded after clinician decisions</p>
-
-          {!loading && !error && notifications.length === 0 && <EmptyState>No notifications recorded yet.</EmptyState>}
-          {!loading && !error && notifications.length > 0 && (
-            <div className="event-list">
-              {notifications.map((notification, index) => (
-                <div className="event-row" key={`${notification.timestamp}-${index}`}>
-                  <div className="event-title">
-                    {notification.channel || "notification"}: {notification.status || "recorded"}
-                  </div>
-                  <div className="event-meta">
-                    {prettyDate(notification.timestamp)}
-                    {notification.patient_ref && ` | patient ${shortId(notification.patient_ref)}`}
-                  </div>
-                  {notification.message && <p className="muted">{notification.message}</p>}
                 </div>
               ))}
             </div>

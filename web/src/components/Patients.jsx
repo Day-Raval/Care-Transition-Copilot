@@ -4,9 +4,14 @@ import { displayPatientName } from "../patientNames.js";
 import { EmptyState, ErrorState, LoadingState } from "./States.jsx";
 
 const PAGE_SIZE = 50;
+const NARRATIVE_SECTIONS = new Set(["History of Present Illness", "Assessment and Plan"]);
 
 function normalizeHistoryItem(text) {
   return text.toLowerCase().replace(/\([^)]*\)/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 const HISTORY_HEADINGS = [
@@ -37,18 +42,93 @@ function stripSectionPrefix(text, sectionName) {
   return text.replace(new RegExp(`^\\s*${escaped}\\s*:\\s*`, "i"), "").trim();
 }
 
-function splitDelimitedText(text) {
-  const parts = text.split(/\s*;\s*/).map(cleanHistoryItem).filter(Boolean);
+function stripAllergyBoilerplate(text) {
+  return String(text || "")
+    .replace(/\bAllergies:\s*No Known Allergies\.?\s*/i, "")
+    .replace(/\bMedications:\s*No Active Medications\.?\.?\s*/i, "")
+    .replace(/\bNo Active Medications\.?\s*/i, "");
+}
+
+function splitListText(text) {
+  const normalized = stripAllergyBoilerplate(text)
+    .replace(/\r/g, "")
+    .replace(/(?:^|\n)\s*[-*]\s+/g, "\n")
+    .replace(/\s+-\s+(?=[A-Za-z0-9{])/g, "\n")
+    .trim();
+  const parts = normalized.split(/\n+|\s*;\s*/).map(cleanHistoryItem).filter(Boolean);
   return parts.length > 1 ? parts : null;
 }
 
+function sectionMode(section) {
+  return NARRATIVE_SECTIONS.has(section) ? "narrative" : "list";
+}
+
+function sectionForItem(section, text) {
+  if (section !== "Plan" && section !== "Assessment and Plan") return section;
+  const normalized = normalizeHistoryItem(text);
+  if (/\b(tablet|capsule|injection|injectable|oral|solution|syringe|mg|ml|unt ml|metoprolol|acetaminophen|insulin|heparin|enoxaparin)\b/.test(normalized)) {
+    return "Medications";
+  }
+  if (/\b(panel|blood|serum|plasma|urine|cbc|troponin|metabolic|urinalysis|differential)\b/.test(normalized)) {
+    return "Lab reports";
+  }
+  if (/\bcare plan\b/.test(normalized)) return "Care plans";
+  if (/\b(procedure|therapy|assessment|discharge from hospital|imaging|operative|referral)\b/.test(normalized)) {
+    return "Procedures";
+  }
+  return section;
+}
+
+function complaintItems(text) {
+  const parts = splitListText(text);
+  return parts || [cleanHistoryItem(text)].filter(Boolean);
+}
+
+function hpiIntroPattern(patientName) {
+  if (patientName) return `${escapeRegExp(patientName).replace(/\s+/g, "\\s+")}\\s+is\\b`;
+  return "[A-Z][A-Za-zÀ-ÿ'’-]+(?:\\s+[A-Z][A-Za-zÀ-ÿ'’-]+)?\\s+is\\b";
+}
+
+function splitEmbeddedChiefComplaint(line, patientName) {
+  const match = line.match(/^Chief Complaint:\s*(.+)$/i);
+  if (!match) return null;
+
+  const rest = match[1].trim();
+  const introMatch = rest.match(new RegExp(`\\b(${hpiIntroPattern(patientName)}.*)$`, "i"));
+  const complaintText = introMatch ? rest.slice(0, introMatch.index).trim() : rest;
+  const introText = introMatch ? introMatch[1].trim() : "";
+
+  return [
+    ...complaintItems(complaintText).map((item) => ({ label: "Chief Complaint", text: item })),
+    ...(introText ? [{ label: "History of Present Illness", text: introText }] : []),
+  ];
+}
+
+function splitLeadingComplaintFromHpi(line, patientName) {
+  const match = line.match(new RegExp(`^(.+?)\\s+(${hpiIntroPattern(patientName)}.*)$`, "i"));
+  if (!match) return null;
+
+  const complaintText = match[1].trim();
+  if (complaintText.split(/\s+/).length > 5) return null;
+
+  return [
+    ...complaintItems(complaintText).map((item) => ({ label: "Chief Complaint", text: item })),
+    { label: "History of Present Illness", text: match[2].trim() },
+  ];
+}
+
 function normalizeHistoryPatientName(text, patientName) {
-  if (!patientName) return text;
-  return text.replace(/\b[A-Z][a-z]+[0-9]{2,}\b/g, patientName);
+  const cleaned = String(text || "").replace(/\b([A-Z][a-zA-ZÀ-ÿ'’-]+)\d+\b/g, "$1");
+  if (!patientName) return cleaned;
+  const firstName = patientName.split(/\s+/)[0];
+  if (!firstName) return cleaned;
+  return cleaned
+    .replace(new RegExp(`^${firstName}\\b(?=\\s+is\\b)`, "i"), patientName)
+    .replace(new RegExp(`^${patientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+${patientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), patientName);
 }
 
 function cleanHistoryItem(text) {
-  const withoutTags = (text || "")
+  const withoutTags = stripAllergyBoilerplate(text)
     .replace(/\s*\((finding|disorder|procedure|situation|record artifact)\)/gi, "");
   const cleaned = dedupeCommaClauses(withoutTags)
     .replace(/\s+/g, " ")
@@ -100,28 +180,64 @@ function splitByHeadings(text) {
   });
 }
 
+function splitHistoryOfPresentIllness(line, label) {
+  const match = line.match(/^(.*?)(?:\s+Patient has a history of\s+)(.+)$/i);
+  if (!match) return null;
+
+  const intro = cleanHistoryItem(match[1]);
+  const historyItems = match[2]
+    .replace(/[.;\s]+$/, "")
+    .split(/\s*,\s*/)
+    .map(cleanHistoryItem)
+    .filter(Boolean);
+  return [
+    ...(intro ? [{ label, text: intro }] : []),
+    ...historyItems.map((item) => ({ label: "History", text: item })),
+  ];
+}
+
 function formatHistoryText(text, sectionName, patientName) {
-  const cleaned = stripSectionPrefix(normalizeHistoryPatientName(text || "", patientName), sectionName || "")
+  const section = sectionName || "Chart note";
+  const cleaned = stripAllergyBoilerplate(stripSectionPrefix(normalizeHistoryPatientName(text || "", patientName), section))
     .replace(/\r/g, "")
     .trim();
   const lines = cleaned.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const groups = [];
 
   lines.forEach((line) => {
+    const embeddedChiefComplaint = splitEmbeddedChiefComplaint(line, patientName);
+    if (embeddedChiefComplaint) {
+      groups.push(...embeddedChiefComplaint);
+      return;
+    }
+    if (section === "History of Present Illness") {
+      const splitComplaint = splitLeadingComplaintFromHpi(line, patientName);
+      if (splitComplaint) {
+        groups.push(...splitComplaint);
+        return;
+      }
+    }
     const headingGroups = splitByHeadings(line);
     if (headingGroups) {
       groups.push(...headingGroups);
       return;
     }
+    if (section === "History of Present Illness") {
+      const splitHistory = splitHistoryOfPresentIllness(line, section);
+      if (splitHistory) {
+        groups.push(...splitHistory);
+        return;
+      }
+    }
     if (/^[-*]\s+/.test(line)) {
-      groups.push({ label: sectionName || "Chart note", text: line.replace(/^[-*]\s+/, "").trim() });
+      groups.push({ label: section, text: line.replace(/^[-*]\s+/, "").trim() });
       return;
     }
-    const parts = splitDelimitedText(line);
+    const parts = splitListText(line);
     if (parts) {
-      groups.push({ label: sectionName || "Chart note", text: parts.join(" - ") });
+      parts.forEach((part) => groups.push({ label: sectionForItem(section, part), text: part }));
     } else {
-      groups.push({ label: sectionName || "Chart note", text: line });
+      groups.push({ label: sectionForItem(section, line), text: line });
     }
   });
 
@@ -129,7 +245,7 @@ function formatHistoryText(text, sectionName, patientName) {
 }
 
 function addHistoryItems(group, text) {
-  const items = splitDelimitedText(text) || [cleanHistoryItem(text)];
+  const items = group.mode === "list" ? (splitListText(text) || [cleanHistoryItem(text)]) : [cleanHistoryItem(text)];
   items.forEach((item) => {
     const key = normalizeHistoryItem(item);
     if (!key || key.length < 3) return;
@@ -174,7 +290,7 @@ function buildHistoryGroups(history, patientName) {
   history.forEach((entry) => {
     formatHistoryText(entry.text, entry.section_name, patientName).forEach(({ label, text }) => {
       const section = label || "Chart note";
-      if (!bySection.has(section)) bySection.set(section, { label: section, items: new Map() });
+      if (!bySection.has(section)) bySection.set(section, { label: section, mode: sectionMode(section), items: new Map() });
       addHistoryItems(bySection.get(section), text);
     });
   });
@@ -182,26 +298,26 @@ function buildHistoryGroups(history, patientName) {
   return Array.from(bySection.values())
     .map((group) => ({
       ...group,
-      items: Array.from(group.items.values()).sort((a, b) => a.text.localeCompare(b.text)),
+      items: Array.from(group.items.values()).sort((a, b) => (
+        group.mode === "list" ? a.text.localeCompare(b.text) : 0
+      )),
     }))
     .filter((group) => group.items.length > 0);
 }
 
 function HistoryEntry({ group }) {
-  const isNarrative = group.items.length === 1 && group.items[0].text.length > 120;
   return (
     <article className="patient-history-entry">
       <div className="patient-history-meta">
         <span className="history-section-chip">{group.label}</span>
       </div>
-      {isNarrative ? (
-        <p>{group.items[0].text}</p>
+      {group.mode === "narrative" ? (
+        group.items.map((item) => <p key={normalizeHistoryItem(item.text)}>{item.text}</p>)
       ) : group.items.length > 0 && (
         <ul className="history-item-list">
           {group.items.map((item) => (
             <li key={normalizeHistoryItem(item.text)}>
               {item.text}
-              {item.count > 1 && <span className="history-repeat"> x{item.count}</span>}
             </li>
           ))}
         </ul>

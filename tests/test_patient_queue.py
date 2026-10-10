@@ -141,6 +141,35 @@ class PatientQueueSearchTest(unittest.TestCase):
 
         self.assertEqual(result.items[0].text, "Duane Gislason is a 62 year-old male.")
 
+    def test_history_removes_no_known_allergy_boilerplate_from_medications(self):
+        patient_id = "patient-74"
+        records = [
+            {
+                "id": "chunk-1",
+                "document": "Medications: Allergies: No Known Allergies. - Lisinopril 10 mg oral tablet",
+                "metadata": {
+                    "patient_id": patient_id,
+                    "discharge_ts": "2026-08-06",
+                    "section_name": "Medications",
+                },
+            },
+        ]
+
+        class FakeCollection:
+            def get(self, where=None, include=None, limit=None, offset=0):
+                selected = [record for record in records if record["metadata"]["patient_id"] == where["patient_id"]]
+                selected = selected[offset:offset + limit]
+                return {
+                    "ids": [record["id"] for record in selected],
+                    "documents": [record["document"] for record in selected],
+                    "metadatas": [record["metadata"] for record in selected],
+                }
+
+        with patch("src.retrieval.query_store.get_collection", return_value=FakeCollection()):
+            result = main.patient_history(main._patient_ref(patient_id), limit=1, offset=0)
+
+        self.assertEqual(result.items[0].text, "Medications: Lisinopril 10 mg oral tablet")
+
 
 if __name__ == "__main__":
     unittest.main()

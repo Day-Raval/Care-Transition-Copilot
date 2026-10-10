@@ -623,13 +623,17 @@ def medication_context(summary: str) -> str:
     return "\n".join(f"- {item}" for item in medications) if medications else "No medication-specific chart excerpts were returned."
 
 
+def display_patient_name(name: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"\d+", "", str(name))).strip()
+
+
 def build_transition_report(assessment: Any, decision: dict[str, Any], disclaimer: str) -> str:
     return "\n\n".join(
         [
             "# Mock Care Transition Report",
             "\n".join(
                 [
-                    f"**Patient:** {assessment.patient_name}",
+                    f"**Patient:** {display_patient_name(assessment.patient_name)}",
                     f"**Discharge timestamp:** {assessment.discharge_ts}",
                     f"**Admission reason:** {assessment.admission_reason}",
                     f"**Readmission risk:** {assessment.risk_category} ({assessment.risk_percentile:.1f} percentile)",

@@ -36,6 +36,28 @@ class TransitionReportTest(unittest.TestCase):
         self.assertIn("Follow up with cardiology", report)
         self.assertIn("Synthetic demo only.", report)
 
+    def test_report_uses_display_patient_name(self):
+        assessment = SimpleNamespace(
+            patient_name="Hai304 Marvin195",
+            discharge_ts="2026-08-09T18:26:39+00:00",
+            admission_reason="History of coronary artery bypass grafting",
+            risk_category="high",
+            risk_percentile=99.9,
+            patient_context_summary="",
+            critique_notes="",
+        )
+        decision = {
+            "actor": "demo_clinician",
+            "decided_at": "2026-09-23T19:24:17+00:00",
+            "draft_plan": "Follow up within 7 days.",
+        }
+
+        report = build_transition_report(assessment, decision, "Synthetic demo only.")
+
+        self.assertIn("**Patient:** Hai Marvin", report)
+        self.assertNotIn("Hai304", report)
+        self.assertNotIn("Marvin195", report)
+
     def test_report_is_saved_with_public_filename(self):
         original_reports_dir = production.REPORTS_DIR
         with tempfile.TemporaryDirectory() as tmpdir:
