@@ -48,7 +48,7 @@ import os  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DISCHARGE_RECORDS_PATH = PROJECT_ROOT / "data" / "processed" / "discharge_records_with_target.csv"
-PREDICTION_LOG_PATH = PROJECT_ROOT / "results" / "prediction_log.csv"
+PREDICTION_LOG_PATH = PROJECT_ROOT / "results" / "operations" / "prediction_log.csv"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:

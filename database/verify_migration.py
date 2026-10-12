@@ -28,6 +28,7 @@ from src.api.production import (  # noqa: E402
     _audit_events_table,
     _care_plans_table,
     _decisions_table,
+    _model_predictions_table,
     sqlalchemy_database_url,
 )
 
@@ -35,6 +36,7 @@ import os  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DISCHARGE_RECORDS_PATH = PROJECT_ROOT / "data" / "processed" / "discharge_records_with_target.csv"
+PREDICTION_LOG_PATH = PROJECT_ROOT / "results" / "operations" / "prediction_log.csv"
 DISCHARGE_RECORDS_TABLE = "discharge_records_with_target"
 
 
@@ -120,11 +122,48 @@ def check_discharge_records(engine) -> bool:
     return ok
 
 
+def check_prediction_log(engine) -> bool:
+    if not PREDICTION_LOG_PATH.exists():
+        print("Prediction log: no local CSV found, skipping.")
+        return True
+
+    df = pd.read_csv(PREDICTION_LOG_PATH)
+    expected = set()
+    for rec in df.to_dict(orient="records"):
+        timestamp = rec.pop("timestamp", None)
+        risk_score = rec.pop("risk_score", None)
+        rec.pop("model_run_id", None)
+        payload_json = json.dumps({k: v for k, v in rec.items() if pd.notna(v)}, ensure_ascii=True, default=str)
+        expected.add((timestamp, risk_score, payload_json))
+
+    with engine.connect() as conn:
+        found = {
+            tuple(row)
+            for row in conn.execute(
+                select(
+                    _model_predictions_table.c.timestamp,
+                    _model_predictions_table.c.risk_score,
+                    _model_predictions_table.c.feature_values_json,
+                )
+            )
+        }
+
+    missing = expected - found
+    ok = not missing
+    status = "PASS" if ok else "FAIL"
+    print(f"[{status}] Prediction log: {len(expected)} unique local rows, {len(missing)} missing in Postgres")
+    for timestamp, risk_score, _ in list(missing)[:10]:
+        print(f"    missing: timestamp={timestamp} risk_score={risk_score}")
+    return ok
+
+
 def print_table_counts(engine) -> None:
     with engine.connect() as conn:
         for table in (_decisions_table, _care_plans_table, _audit_events_table):
             count = conn.execute(select(func.count()).select_from(table)).scalar_one()
             print(f"  {table.name}: {count} rows in Postgres")
+        count = conn.execute(select(func.count()).select_from(_model_predictions_table)).scalar_one()
+        print(f"  {_model_predictions_table.name}: {count} rows in Postgres")
         result = conn.execute(text(f'SELECT to_regclass(\'"{DISCHARGE_RECORDS_TABLE}"\')')).scalar()
         if result is not None:
             count = conn.execute(text(f'SELECT COUNT(*) FROM "{DISCHARGE_RECORDS_TABLE}"')).scalar_one()
@@ -147,6 +186,7 @@ def main() -> int:
             check_jsonl(engine, CARE_PLANS_PATH, _care_plans_table, "Care plans"),
             check_jsonl(engine, AUDIT_LOG_PATH, _audit_events_table, "Audit log"),
             check_discharge_records(engine),
+            check_prediction_log(engine),
         ]
         return 0 if all(results) else 1
     finally:
