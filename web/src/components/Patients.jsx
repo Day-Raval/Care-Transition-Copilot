@@ -425,7 +425,9 @@ export default function Patients() {
   return (
     <div className="panel">
       <h2>Patients</h2>
-      <p className="panel-subtitle">Browse discharged patient episodes beyond the 20-patient risk queue.</p>
+      <p className="panel-subtitle">
+        Explore the full discharge episode registry, search by patient or clinical context, and open indexed chart history before reviewing care-transition needs.
+      </p>
 
       <form className="patient-browse-controls" onSubmit={submitSearch}>
         <label className="patient-search">
