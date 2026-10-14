@@ -2,43 +2,91 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-
       - name: Scan for committed secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   test:
-    runs-on: ubuntu-latest
-
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PYTHON_DOTENV_DISABLED: "1"
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
+          python-version: "3.12.13"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "20"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: web/package-lock.json
-
-      - name: Install Python dependencies
+      - name: Create isolated Python environment
         run: |
-          python -m pip install --upgrade pip uv
-          uv pip install --system -r requirements.txt
-          uv pip install --system -e . pytest
-
-      - name: Run checks
-        run: bash scripts/check.sh
+          python -m pip install uv==0.11.3
+          python -m venv .venv-ci
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          python = (Path('.venv-ci') / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')).resolve()
+          with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as handle:
+              handle.write(str(python.parent) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              handle.write('CARE_TRANSITION_TEST_PYTHON=' + str(python) + '\n')
+          PY
+      - name: Install locked Python dependencies
+        run: uv pip sync --python "$CARE_TRANSITION_TEST_PYTHON" requirements.lock
+      - name: Run Python tests
+        run: python -m pytest -q tests --junitxml=test-results/python.xml
+      - name: Install locked frontend dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build local frontend
+        working-directory: web
+        run: npm run build:local
+      - name: Install browser
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run isolated browser workflows
+        working-directory: web
+        run: npm run test:e2e
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-results-${{ matrix.os }}
+          retention-days: 7
+          path: |
+            test-results/python.xml
+            web/test-results/
+            web/playwright-report/

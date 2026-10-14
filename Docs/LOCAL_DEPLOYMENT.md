@@ -108,6 +108,8 @@ checks against the saved artifacts.
 
 ## Verification
 
+For GitHub Actions and packaged local updates with rollback, see [CI/CD](CI_CD.md).
+
 ```powershell
 .venv-local/Scripts/python.exe -m pytest -q
 cd web
@@ -117,8 +119,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Browser tests use real risk scoring, retrieval, API routes, and isolated persistent
-storage. They stub hosted AI responses for deterministic success/outage coverage;
+Browser tests generate an isolated synthetic dataset/model/store and use real risk
+scoring, retrieval, API routes, and persistent storage. They stub hosted AI responses
+and use deterministic test embeddings for success/outage coverage;
 test-only controls are absent from the deployed app. The separate-process integration
 test verifies approval, assessment, and report persistence after an actual process
 exit/restart with Groq calls prohibited. It requires provisioned artifacts and a build.

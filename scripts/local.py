@@ -134,8 +134,9 @@ def restore_backup(root, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["run", "check", "backup", "restore"])
+    parser.add_argument("command", choices=["run", "check", "backup", "restore", "update"])
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--checksums", type=Path)
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     os.chdir(ROOT)
@@ -146,6 +147,14 @@ def main():
                        "LANGSMITH_TRACING": "false", "NOTIFICATIONS_ENABLED": "false",
                        "PRECOMPUTE_ON_STARTUP": "false"})
     try:
+        if args.command == "update":
+            if not args.archive or not args.checksums:
+                raise RuntimeError("Update requires --archive <release.zip> and --checksums <SHA256SUMS>.")
+            from scripts.release import apply_release
+            release, recovery = apply_release(ROOT, args.archive, args.checksums)
+            print(f"Installed {release['version']} ({release['commit'][:7]}). Recovery files: {recovery}")
+            print("Readiness passed. Start the app with the local run command.")
+            return
         if args.command in {"backup", "restore"}:
             with deployment_lock():
                 if os.getenv("PERSISTENCE_BACKEND", "local") != "local":

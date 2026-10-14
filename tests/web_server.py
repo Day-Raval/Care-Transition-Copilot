@@ -10,22 +10,23 @@ import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dotenv import load_dotenv
 import httpx
 from groq import APIConnectionError
 from groq.resources.chat.completions import Completions
 import uvicorn
 
 from src.api import local
+from tests.browser_fixtures import prepare_browser_fixture
 
-os.chdir(local.ROOT)
-load_dotenv(".env")
 os.environ.update({"PERSISTENCE_BACKEND": "local", "AUTH_MODE": "api_key", "REDIS_URL": "",
+                   "PYTHON_DOTENV_DISABLED": "1",
+                   "API_KEY": "browser-fixture-key-0123456789", "PATIENT_REF_SALT": "browser-fixture-salt-0123456789",
+                   "GROQ_API_KEY": "browser-fixture-provider-key", "CRITIQUE_MODEL_API_KEY": "browser-fixture-provider-key",
+                   "CHROMA_PATH": "data/processed/chroma_db", "CHROMA_COLLECTION": "discharge_notes",
                    "KAFKA_ENABLED": "false", "KAFKA_CONSUMER_ENABLED": "false", "LANGSMITH_TRACING": "false",
                    "NOTIFICATIONS_ENABLED": "false", "PRECOMPUTE_ON_STARTUP": "false",
                    "RISK_API_BASE_URL": "http://127.0.0.1:8093/api", "RATE_LIMIT_CHAT_PER_MINUTE": "0",
                    "RATE_LIMIT_ASSESSMENT_PER_MINUTE": "0", "RATE_LIMIT_WRITE_PER_MINUTE": "0"})
-from src.api import main, production
 
 outage = False
 
@@ -59,6 +60,10 @@ def completion(**kwargs):
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="copilot-browser-") as folder:
         root = Path(folder)
+        os.chdir(root)
+        local.ROOT = root
+        prepare_browser_fixture(root)
+        from src.api import main, production
         production.CARE_DELIVERY_RESULTS_DIR = root / "care_delivery"
         production.OPERATIONS_RESULTS_DIR = root / "operations"
         production.RESULTS_DIR = root

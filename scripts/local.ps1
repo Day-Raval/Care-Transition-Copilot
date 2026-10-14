@@ -1,6 +1,7 @@
 param(
-  [ValidateSet("install", "run", "check", "backup", "restore")][string]$Command = "run",
+  [ValidateSet("install", "run", "check", "backup", "restore", "update")][string]$Command = "run",
   [string]$Archive,
+  [string]$Checksums,
   [int]$Port = 8080
 )
 $ErrorActionPreference = "Stop"
@@ -26,6 +27,7 @@ $LocalArguments = @("--port", "$Port")
 if ($Archive) {
   $LocalArguments += @("--archive", $Archive)
 }
+if ($Checksums) { $LocalArguments += @("--checksums", $Checksums) }
 if (-not (Test-Path -LiteralPath $LocalPython)) { throw "Run scripts/local.ps1 -Command install first." }
 Push-Location $ProjectRoot
 try { & $LocalPython -m scripts.local $Command @LocalArguments }

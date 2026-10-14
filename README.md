@@ -167,6 +167,8 @@ external EHR.
 For a single-computer deployment with the built web app, validated startup,
 persistent approvals/reports, and backup/restore commands, see
 [Local deployment](Docs/LOCAL_DEPLOYMENT.md).
+GitHub Actions checks, versioned release packages, and local update/rollback commands
+are documented in [CI/CD for the local MVP](Docs/CI_CD.md).
 
 ### Prerequisites
 
