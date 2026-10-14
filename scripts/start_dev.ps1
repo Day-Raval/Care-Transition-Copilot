@@ -10,11 +10,19 @@ if ($FullRoot -notmatch "^([A-Za-z]):\\(.*)$") {
 }
 $Drive = $Matches[1].ToLowerInvariant()
 $WslRoot = "/mnt/$Drive/" + ($Matches[2] -replace "\\", "/")
-$WslIp = (wsl sh -lc "hostname -I | awk '{print `$1}'").Trim()
-$ApiTarget = "http://$WslIp`:8080"
+$ApiTarget = "http://127.0.0.1:8080"
 
 Write-Host "Starting FastAPI at $ApiTarget"
 wsl bash -lc "cd '$WslRoot' && bash scripts/start_dev.sh --api-only"
+if ($LASTEXITCODE -ne 0) {
+  throw "FastAPI startup failed in WSL (exit code $LASTEXITCODE)."
+}
+try {
+  $Health = Invoke-RestMethod -Uri "$ApiTarget/health" -TimeoutSec 10
+  if ($Health.status -ne "ok") { throw "Unexpected health response." }
+} catch {
+  throw "FastAPI is not reachable from Windows at $ApiTarget. Check WSL localhost forwarding. $($_.Exception.Message)"
+}
 
 $env:API_PROXY_TARGET = $ApiTarget
 if ($ApiOnly) {

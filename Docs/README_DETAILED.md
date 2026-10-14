@@ -674,8 +674,8 @@ cd /mnt/c/Users/dayes/Downloads/Care_Transition_Copilot
 bash dev.sh
 ```
 
-This activates `.venv`, finds the current WSL IP, restarts FastAPI on port
-`8080` with access logs disabled, waits for `/health`, sets `API_PROXY_TARGET`,
+This activates the Python environment, restarts FastAPI on `127.0.0.1:8080`
+with access logs disabled, waits for `/health`, sets `API_PROXY_TARGET`,
 streams `logs/api.log`, and then starts Vite.
 
 If you only need to restart the API:
@@ -685,11 +685,13 @@ cd /mnt/c/Users/dayes/Downloads/Care_Transition_Copilot
 bash dev.sh --api-only
 ```
 
-From PowerShell, use `cd web; npm run dev:full:win`.
+From PowerShell, use `cd web; npm run dev:full:win`. The launcher also checks
+that Windows can reach FastAPI through WSL localhost forwarding before starting Vite.
 
 Then open `http://127.0.0.1:5173/`. The browser calls same-origin `/api`, and
-Vite proxies that to FastAPI, so browser requests do not depend on
-`localhost:8080` or a hard-coded WSL IP.
+Vite proxies that to FastAPI at `http://127.0.0.1:8080`. Windows uses WSL
+localhost forwarding instead of connecting directly to the WSL virtual IP.
+For an API on another host, set `API_PROXY_TARGET` before starting Vite.
 
 The frontend privacy boundary uses `patient_ref` instead of exposing raw
 `patient_id` values. Queue, assessment, decision, report, chat, audit,

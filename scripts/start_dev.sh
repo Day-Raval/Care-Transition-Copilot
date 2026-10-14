@@ -17,8 +17,7 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 source "$VENV/bin/activate"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-WSL_IP="$(hostname -I | awk '{print $1}')"
-API_TARGET="http://${WSL_IP}:8080"
+API_TARGET="http://127.0.0.1:8080"
 STARTUP_TIMEOUT_SECONDS="${API_STARTUP_TIMEOUT_SECONDS:-180}"
 API_LOG_TAIL_LINES="${API_LOG_TAIL_LINES:-80}"
 API_LOG_FILE="$ROOT/logs/api.log"
@@ -56,7 +55,7 @@ done
 
 mkdir -p "$ROOT/logs"
 nohup python -m uvicorn src.api.main:app \
-  --host "$WSL_IP" \
+  --host 127.0.0.1 \
   --port 8080 \
   $UVICORN_ACCESS_LOG_FLAG \
   > "$API_LOG_FILE" 2>&1 &
