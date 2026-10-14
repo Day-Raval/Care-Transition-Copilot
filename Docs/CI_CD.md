@@ -25,7 +25,8 @@ and calls from the release workflow. It performs:
 
 1. Gitleaks scanning of committed history.
 2. Tests on both `ubuntu-latest` and `windows-latest`.
-3. Python 3.12.13, Node 24.19.0, and uv 0.11.3 setup.
+3. Python 3.12.10 (available on both GitHub runner platforms), Node 24.19.0,
+   and uv 0.11.3 setup. Local deployments may use other Python 3.12 patch releases.
 4. An isolated Python environment synced from `requirements.lock`.
 5. Python tests, including package validation and rollback scenarios.
 6. `npm ci`, `npm run build:local`, and Chromium browser workflow tests.
