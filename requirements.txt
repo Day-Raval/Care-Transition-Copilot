@@ -19,3 +19,11 @@ PyJWT[crypto]
 confluent-kafka
 langsmith
 prometheus-client
+numpy
+pandas
+scipy
+joblib
+PyYAML
+pydantic
+pytest
+httpx

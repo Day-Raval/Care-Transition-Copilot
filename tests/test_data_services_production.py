@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -98,7 +99,7 @@ class DataServicesProductionTest(unittest.TestCase):
                 }
             )
 
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn, conn:
                 audit = conn.execute(
                     "SELECT patient_id, discharge_ts, actor, request_id, model_run_id FROM audit_events"
                 ).fetchone()

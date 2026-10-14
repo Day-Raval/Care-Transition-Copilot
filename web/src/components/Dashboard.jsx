@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getAssessment,
   getDecision,
@@ -406,6 +406,7 @@ function EvidenceQualitySummary({ items }) {
 }
 
 export default function Dashboard() {
+  const selectionVersion = useRef(0);
   const { canDecide } = useAuth();
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -437,6 +438,7 @@ export default function Dashboard() {
   }, []);
 
   function selectPatient(item) {
+    const version = ++selectionVersion.current;
     setSelected(item);
     setAssessment(null);
     setDecision(null);
@@ -452,12 +454,16 @@ export default function Dashboard() {
     setReminderMessage("");
     setReminderStatus("");
     setLoadingAssessment(true);
-    Promise.all([
+    Promise.allSettled([
       getAssessment(item.patient_ref, item.discharge_ts),
       getDecision(item.patient_ref, item.discharge_ts),
       getFollowUp(item.patient_ref, item.discharge_ts),
     ])
-      .then(([assessmentResult, decisionResult, followUpResult]) => {
+      .then(([assessmentResponse, decisionResponse, followUpResponse]) => {
+        if (version !== selectionVersion.current) return;
+        const assessmentResult = assessmentResponse.status === "fulfilled" ? assessmentResponse.value : null;
+        const decisionResult = decisionResponse.status === "fulfilled" ? decisionResponse.value : null;
+        const followUpResult = followUpResponse.status === "fulfilled" ? followUpResponse.value : null;
         setAssessment(assessmentResult);
         setDecision(decisionResult);
         setFollowUp(followUpResult);
@@ -465,20 +471,21 @@ export default function Dashboard() {
           setFollowUpStatus(followUpResult.status);
           setFollowUpNote(followUpResult.note || "");
         }
-        setEditedDraftPlan(displayCarePlanText(decisionResult?.draft_plan || assessmentResult.draft_plan));
-        if (decisionResult) loadReport(item);
+        setEditedDraftPlan(displayCarePlanText(decisionResult?.draft_plan || assessmentResult?.draft_plan || ""));
+        if (decisionResult) loadReport(item, version);
+        const failed = [assessmentResponse, decisionResponse, followUpResponse].find((result) => result.status === "rejected");
+        if (failed) setError(failed.reason.message);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingAssessment(false));
+      .finally(() => { if (version === selectionVersion.current) setLoadingAssessment(false); });
   }
 
-  function loadReport(item) {
+  function loadReport(item, version = selectionVersion.current) {
     setLoadingReport(true);
     setReport(null);
     getReport(item.patient_ref, item.discharge_ts)
-      .then(setReport)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingReport(false));
+      .then((result) => { if (version === selectionVersion.current) setReport(result); })
+      .catch((e) => { if (version === selectionVersion.current) setError(e.message); })
+      .finally(() => { if (version === selectionVersion.current) setLoadingReport(false); });
   }
 
   function reportFileName() {
@@ -579,7 +586,7 @@ export default function Dashboard() {
               <div
                 key={`${item.patient_ref}-${item.discharge_ts}`}
                 className={`queue-card ${selected?.patient_ref === item.patient_ref && selected?.discharge_ts === item.discharge_ts ? "selected" : ""}`}
-                onClick={() => selectPatient(item)}
+                onClick={() => { if (!savingDecision && !savingFollowUp && !savingReminder) selectPatient(item); }}
               >
                 <div className="queue-card-main">
                   <div className="queue-card-name">{displayPatientName(item.patient_name)}</div>
@@ -668,7 +675,7 @@ export default function Dashboard() {
         <div className="panel panel-gold">
           <h2>Draft follow-up plan</h2>
           <p className="panel-subtitle">
-            AI-generated for {assessment ? displayPatientName(assessment.patient_name) : "…"} — pending clinician action
+            AI-generated for {assessment || selected ? displayPatientName(assessment?.patient_name || selected.patient_name) : "…"} — pending clinician action
           </p>
 
           {loadingAssessment && <p className="muted">Drafting plan…</p>}
@@ -676,7 +683,7 @@ export default function Dashboard() {
             <p className="muted">Select a patient to draft a follow-up plan.</p>
           )}
 
-          {assessment && !loadingAssessment && (
+          {(assessment || decision) && !loadingAssessment && (
             <>
               {isLowRisk ? (
                 <p>{LOW_RISK_PLAN_MESSAGE}</p>
@@ -704,7 +711,7 @@ export default function Dashboard() {
                     <summary>View critique notes</summary>
                     <div
                       className="plan-rendered"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(assessment.critique_notes) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(assessment?.critique_notes || "Review notes unavailable.") }}
                     />
                   </details>
 

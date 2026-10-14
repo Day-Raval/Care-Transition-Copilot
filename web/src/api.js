@@ -5,7 +5,7 @@ const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_REQUEST_TIMEOUT_MS || 300
 const ASSESSMENT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSESSMENT_TIMEOUT_MS || 120000);
 const CHAT_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS || 120000);
 const HISTORY_TIMEOUT_MS = Number(import.meta.env.VITE_HISTORY_TIMEOUT_MS || 120000);
-const API_KEY = import.meta.env.VITE_API_KEY || "";
+const API_KEY = globalThis.__LOCAL_CONFIG__?.apiKey ?? (import.meta.env.VITE_API_KEY || "");
 const CLINICIAN_ID = import.meta.env.VITE_CLINICIAN_ID || "demo_clinician";
 
 function newRequestId() {
@@ -51,7 +51,7 @@ async function request(path, options = {}) {
       throw errorWithRequestId("Request timed out. The API may still be working; try again in a moment.", requestId);
     }
     if (e instanceof TypeError && e.message === "Failed to fetch") {
-      throw errorWithRequestId(`Could not reach the API through ${API_BASE}. Start FastAPI with uvicorn and Vite with npm run dev.`, requestId);
+      throw errorWithRequestId("Could not reach the app. Check that the local deployment is running, then retry.", requestId);
     }
     throw e;
   } finally {

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +22,7 @@ class DecisionIdempotencyTest(unittest.TestCase):
                 production.save_decision("patient-1", "2026-09-24", "rejected", "second", actor="physician_b")
 
                 latest = production.latest_decision("patient-1", "2026-09-24")
-                with sqlite3.connect(production.DECISIONS_DB_PATH) as conn:
+                with closing(sqlite3.connect(production.DECISIONS_DB_PATH)) as conn, conn:
                     count = conn.execute("SELECT COUNT(*) FROM care_plan_decisions").fetchone()[0]
 
                 self.assertEqual(count, 1)

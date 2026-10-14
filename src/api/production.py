@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 from contextvars import ContextVar
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
 
 from src.data_services.kafka_events import kafka_dependency_report, publish_audit_event
 from src.data_services.notifications import (
@@ -51,7 +53,7 @@ FOLLOW_UPS_PATH = CARE_DELIVERY_RESULTS_DIR / "follow_ups.jsonl"
 REMINDERS_PATH = CARE_DELIVERY_RESULTS_DIR / "reminders.jsonl"
 DECISIONS_DB_PATH = CARE_DELIVERY_RESULTS_DIR / "decisions.sqlite3"
 REPORTS_DIR = Path("reports")
-CHROMA_PATH = "data/processed/chroma_db"
+CHROMA_PATH = os.getenv("CHROMA_PATH", "data/processed/chroma_db")
 DEFAULT_ACTOR = "demo_clinician"
 DATABASE_BACKENDS = {"database", "postgres", "postgresql"}
 DISCHARGE_RECORDS_TABLE = "discharge_records_with_target"
@@ -194,7 +196,9 @@ def sqlalchemy_database_url(url: str) -> str:
 def _db_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(sqlalchemy_database_url(os.environ["DATABASE_URL"]), future=True)
+        url = sqlalchemy_database_url(os.environ["DATABASE_URL"])
+        options = {"poolclass": NullPool} if url.startswith("sqlite:") else {}
+        _engine = create_engine(url, future=True, **options)
     return _engine
 
 
@@ -233,6 +237,8 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(_json_dumps(record) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def read_jsonl(path: Path, limit: int = 100) -> list[dict[str, Any]]:
@@ -659,7 +665,17 @@ def public_report_path(patient_id: str, discharge_ts: str) -> Path:
 def save_transition_report(patient_id: str, discharge_ts: str, report_markdown: str) -> Path:
     path = public_report_path(patient_id, discharge_ts)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(report_markdown, encoding="utf-8")
+    import tempfile
+    # Replace atomically so an interrupted write cannot truncate an existing report.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as f:
+        temp_path = Path(f.name)
+        f.write(report_markdown)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     return path
 
 
@@ -669,7 +685,7 @@ def init_decision_db() -> None:
         return
 
     DECISIONS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+    with closing(sqlite3.connect(DECISIONS_DB_PATH)) as conn, conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS care_plan_decisions (
@@ -747,7 +763,7 @@ def save_decision(
             )
         return record
 
-    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+    with closing(sqlite3.connect(DECISIONS_DB_PATH)) as conn, conn:
         conn.execute(
             """
             INSERT INTO care_plan_decisions
@@ -785,7 +801,7 @@ def latest_decision(patient_id: str, discharge_ts: str | None = None) -> dict[st
 
     sqlite_sql = sql.replace(":patient_id", "?").replace(":discharge_ts", "?")
     sqlite_params = [patient_id] + ([discharge_ts] if discharge_ts is not None else [])
-    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+    with closing(sqlite3.connect(DECISIONS_DB_PATH)) as conn, conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(sqlite_sql, sqlite_params).fetchone()
     return dict(row) if row else None
@@ -808,7 +824,7 @@ def read_decisions(limit: int = 10000) -> list[dict[str, Any]]:
             ).mappings()
         return [dict(row) for row in rows]
 
-    with sqlite3.connect(DECISIONS_DB_PATH) as conn:
+    with closing(sqlite3.connect(DECISIONS_DB_PATH)) as conn, conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """

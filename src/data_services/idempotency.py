@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 import threading
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -61,7 +62,7 @@ class IdempotencyTracker:
             metadata.create_all(self._engine)
         else:
             self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self._sqlite_path) as conn:
+            with closing(sqlite3.connect(self._sqlite_path)) as conn, conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS processed_stream_events (
@@ -99,7 +100,7 @@ class IdempotencyTracker:
                 logger.warning("Error checking DB idempotency for %s: %s", event_id, exc)
         else:
             try:
-                with sqlite3.connect(self._sqlite_path) as conn:
+                with closing(sqlite3.connect(self._sqlite_path)) as conn, conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT 1 FROM processed_stream_events WHERE event_id = ?",
@@ -154,7 +155,7 @@ class IdempotencyTracker:
                 return False
         else:
             try:
-                with sqlite3.connect(self._sqlite_path) as conn:
+                with closing(sqlite3.connect(self._sqlite_path)) as conn, conn:
                     conn.execute(
                         """
                         INSERT OR IGNORE INTO processed_stream_events (event_id, topic, processed_at, details_json)
@@ -180,7 +181,7 @@ class IdempotencyTracker:
             with self._engine.begin() as conn:
                 conn.execute(text("DELETE FROM processed_stream_events"))
         elif self._sqlite_path.exists():
-            with sqlite3.connect(self._sqlite_path) as conn:
+            with closing(sqlite3.connect(self._sqlite_path)) as conn, conn:
                 conn.execute("DELETE FROM processed_stream_events")
                 conn.commit()
 

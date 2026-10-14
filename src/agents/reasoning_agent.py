@@ -28,7 +28,7 @@ import os
 from groq import Groq
 
 from src.api.observability import llm_call, safe_trace_inputs, trace_block
-from src.utils.runtime import LLM_TIMEOUT_SECONDS
+from src.utils.runtime import LLM_TIMEOUT_SECONDS, LLMUnavailableError
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
@@ -57,11 +57,11 @@ def draft_care_plan(patient_context_summary: str) -> str:
     """
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError(
+        raise LLMUnavailableError(
             "GROQ_API_KEY not set. add it to your .env file as:\n  GROQ_API_KEY=your_key_here"
         )
 
-    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
+    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS, max_retries=0)
     with (
         llm_call("reasoning", GROQ_MODEL),
         trace_block(

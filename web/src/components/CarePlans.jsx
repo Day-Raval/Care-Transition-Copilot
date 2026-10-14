@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getAssessment, getPrecomputeStatus, getQueue, triggerPrecompute } from "../api.js";
 import { LOW_RISK_PLAN_MESSAGE, displayCarePlanText } from "../carePlanText.js";
 import { renderMarkdown } from "../markdown.js";
@@ -25,6 +25,7 @@ function matchesQueueFilter(patient, filter) {
 }
 
 export default function CarePlans() {
+  const selectionVersion = useRef(0);
   const [patients, setPatients] = useState([]);
   const [queueFilter, setQueueFilter] = useState("all");
   const [selected, setSelected] = useState(null);
@@ -85,14 +86,15 @@ export default function CarePlans() {
   }
 
   function selectPatient(patient) {
+    const version = ++selectionVersion.current;
     setSelected(patient);
     setAssessment(null);
     setError(null);
     setLoadingPlan(true);
-    getAssessment(patient.patient_ref)
-      .then(setAssessment)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingPlan(false));
+    getAssessment(patient.patient_ref, patient.discharge_ts)
+      .then((result) => { if (version === selectionVersion.current) setAssessment(result); })
+      .catch((e) => { if (version === selectionVersion.current) setError(e.message); })
+      .finally(() => { if (version === selectionVersion.current) setLoadingPlan(false); });
   }
 
   return (
@@ -147,7 +149,7 @@ export default function CarePlans() {
           {visiblePatients.map((patient) => (
             <div
               key={`${patient.patient_ref}-${patient.discharge_ts}`}
-              className={`queue-card ${selected?.patient_ref === patient.patient_ref ? "selected" : ""}`}
+              className={`queue-card ${selected?.patient_ref === patient.patient_ref && selected?.discharge_ts === patient.discharge_ts ? "selected" : ""}`}
               onClick={() => selectPatient(patient)}
             >
               <div className="queue-card-main">

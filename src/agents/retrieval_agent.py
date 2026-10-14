@@ -71,7 +71,7 @@ def generate_dynamic_categories(admission_reason: str, risk_info: dict | None = 
         context_line += f"\nRisk category: {risk_info.get('risk_category', 'unknown')}"
 
     try:
-        client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
+        client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS, max_retries=0)
         with (
             llm_call("retrieval_categories", model),
             trace_block(

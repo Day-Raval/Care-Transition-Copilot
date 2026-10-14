@@ -1,6 +1,13 @@
 import os
 
 
+class LLMUnavailableError(RuntimeError):
+    MESSAGE = (
+        "AI generation is unavailable. Check the Groq configuration or connection and retry. "
+        "Patient review and saved decisions remain available."
+    )
+
+
 def env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None:

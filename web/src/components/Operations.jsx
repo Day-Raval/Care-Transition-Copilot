@@ -142,6 +142,7 @@ export default function Operations() {
                   </span>
                 ))}
               </div>
+              {system.health.ai && <p className="muted">AI service: {system.health.ai.status.replaceAll("_", " ")}</p>}
             </>
           )}
           {!loading && system.errors.map((message) => (

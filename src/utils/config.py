@@ -24,7 +24,7 @@ class Config:
 def load_config(path: str = "config.yaml") -> Config:
     if not os.path.exists(path):
         return Config()
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     return Config(
         fhir_dir=raw.get("data", {}).get("fhir_dir", Config.fhir_dir),

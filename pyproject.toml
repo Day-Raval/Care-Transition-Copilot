@@ -27,9 +27,16 @@ dependencies = [
     "confluent-kafka",
     "langsmith",
     "prometheus-client",
+    "numpy",
+    "pandas",
+    "scipy",
+    "joblib",
+    "PyYAML",
+    "pydantic",
 ]
 
 [dependency-groups]
 dev = [
     "pytest",
+    "httpx",
 ]

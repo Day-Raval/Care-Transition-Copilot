@@ -22,6 +22,9 @@ def setup_logging(log_dir: str = "logs", log_file: str = "pipeline.log", level: 
 
     if os.getenv("API_ACCESS_LOGS", "false").strip().lower() not in {"1", "true", "yes", "on"}:
         logging.getLogger("uvicorn.access").disabled = True
+    # SDK debug logs contain full prompt bodies; retain application logs without that noise.
+    for name in ("groq", "httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     os.makedirs(log_dir, exist_ok=True)
 
@@ -39,7 +42,8 @@ def setup_logging(log_dir: str = "logs", log_file: str = "pipeline.log", level: 
     root.addHandler(console)
 
     file_handler = RotatingFileHandler(
-        os.path.join(log_dir, log_file), maxBytes=5_000_000, backupCount=3
+        os.path.join(log_dir, log_file), maxBytes=5_000_000, backupCount=3,
+        encoding="utf-8", errors="backslashreplace",
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(fmt)

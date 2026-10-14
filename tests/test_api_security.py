@@ -114,6 +114,8 @@ class OIDCAuthenticationTest(unittest.TestCase):
             patch.object(main, "_latest_discharge_ts", return_value="2026-09-24"),
             patch.object(main, "_assessment_cache_get", return_value=SimpleNamespace(draft_plan="Follow-up plan")),
             patch.object(main, "save_decision", return_value=stored_decision) as save_decision,
+            patch.object(main, "build_transition_report", return_value="Approved report"),
+            patch.object(main, "save_transition_report") as save_report,
             patch.object(main, "record_fhir_writeback", return_value={"status": "stub_recorded"}),
             patch.object(main, "notify_care_plan_decision", return_value={"channel": "portal_stub", "status": "queued"}),
             patch.object(main, "log_audit_event"),
@@ -131,6 +133,7 @@ class OIDCAuthenticationTest(unittest.TestCase):
         self.assertEqual(response.json()["actor"], "clinician-123")
         self.assertEqual(save_decision.call_args.kwargs["actor"], "clinician-123")
         self.assertEqual(save_decision.call_args.kwargs["draft_plan"], "Edited follow-up plan")
+        save_report.assert_called_once_with("patient-1", "2026-09-24", "Approved report")
 
     def test_health_remains_public_and_predict_requires_service_key(self):
         client = TestClient(main.app)

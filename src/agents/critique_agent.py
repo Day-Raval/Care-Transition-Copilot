@@ -26,7 +26,7 @@ import os
 from groq import Groq
 
 from src.api.observability import llm_call, safe_trace_inputs, trace_block
-from src.utils.runtime import LLM_TIMEOUT_SECONDS
+from src.utils.runtime import LLM_TIMEOUT_SECONDS, LLMUnavailableError
 
 CRITIQUE_MODEL = os.getenv("CRITIQUE_MODEL_NAME", "openai/gpt-oss-20b")
 
@@ -60,13 +60,13 @@ def critique_plan(patient_context_summary: str, draft_plan: str, risk_context: s
     """
     api_key = os.getenv("CRITIQUE_MODEL_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError(
+        raise LLMUnavailableError(
             "CRITIQUE_MODEL_API_KEY not set. Add it to your .env file as:\n"
             "  CRITIQUE_MODEL_API_KEY=your_key_here\n"
             "(Can reuse your GROQ_API_KEY since both models are on Groq.)"
         )
 
-    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS)
+    client = Groq(api_key=api_key, timeout=LLM_TIMEOUT_SECONDS, max_retries=0)
     with (
         llm_call("critique", CRITIQUE_MODEL),
         trace_block(

@@ -9,6 +9,8 @@
     "dev:full:win": "powershell -ExecutionPolicy Bypass -File ../scripts/start_dev.ps1",
     "api": "bash ../scripts/start_dev.sh --api-only",
     "build": "vite build",
+    "build:local": "vite build --mode deployment",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,6 +20,7 @@
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@vitejs/plugin-react": "^6.1.2",
     "vite": "^8.3.0"
   }

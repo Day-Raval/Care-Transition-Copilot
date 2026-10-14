@@ -164,6 +164,10 @@ external EHR.
 
 ## Quick Start
 
+For a single-computer deployment with the built web app, validated startup,
+persistent approvals/reports, and backup/restore commands, see
+[Local deployment](Docs/LOCAL_DEPLOYMENT.md).
+
 ### Prerequisites
 
 - Python 3.12+

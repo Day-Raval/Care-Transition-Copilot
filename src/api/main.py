@@ -53,6 +53,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from groq import APIError
 
 load_dotenv()  # must run before /assessment or /chat are ever called —
                 # these now invoke Groq directly from within the API
@@ -80,6 +81,7 @@ from src.api.production import (
     load_discharge_records,
     log_audit_event,
     notify_care_plan_decision,
+    public_report_path,
     read_audit_events,
     read_care_plans,
     read_decisions,
@@ -130,6 +132,7 @@ from src.ingestion.hl7_intake import process_realtime_intake
 from src.model.experiment_registry import load_model
 from src.utils.config import load_config
 from src.utils.logging_config import setup_logging
+from src.utils.runtime import LLMUnavailableError
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -231,7 +234,7 @@ async def request_context(request: Request, call_next):
     request.state.request_id = request_id
     response = None
     try:
-        path = request.url.path
+        path = request.url.path.removeprefix(request.scope.get("root_path", ""))
         method = request.method
         content_length = request.headers.get("content-length")
         try:
@@ -245,7 +248,7 @@ async def request_context(request: Request, call_next):
                 headers={"X-Request-ID": request_id},
             )
             return response
-        if path in {"/health", "/metrics"} or path.startswith("/metrics/") or method == "OPTIONS":
+        if path in {"/health", "/ready", "/metrics"} or path.startswith("/metrics/") or method == "OPTIONS":
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             return response
@@ -739,6 +742,10 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
             result = graph.invoke({"patient_id": patient_id, "discharge_ts": discharge_ts})
             if trace:
                 trace.end(outputs=safe_trace_inputs(risk_category=result.get("risk_category")))
+    except (APIError, LLMUnavailableError) as e:
+        _state["ai_status"] = "unavailable"
+        logger.warning("Assessment AI unavailable: %s", type(e).__name__)
+        raise HTTPException(status_code=503, detail=LLMUnavailableError.MESSAGE) from e
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
@@ -784,6 +791,8 @@ def _generate_assessment(patient_id: str, discharge_ts: str) -> FullAssessment:
         risk_percentile=assessment.risk_percentile,
     )
     _assessment_cache_set(assessment)
+    if not is_low_risk:
+        _state["ai_status"] = "available"
     return assessment
 
 
@@ -851,6 +860,7 @@ def load_production_model():
     _state["training_events"] = int(modeling_df["event_observed"].sum())
     _state["queue_df"] = modeling_df[["patient_id", "patient_name", "discharge_ts", "admission_reason"]].reset_index(drop=True)
     _state["assessment_cache"] = {}
+    _state["ai_status"] = "not_checked" if os.getenv("GROQ_API_KEY") else "not_configured"
     _state["assessment_cache_lock"] = threading.Lock()
     init_decision_db()
 
@@ -908,11 +918,21 @@ def health():
     _state["runtime_dependencies"] = dependencies
     consumer = _state.get("kafka_consumer")
     return {
-        "status": "ok" if dependencies["ready"] else "degraded",
+        "status": "ok" if dependencies["ready"] and _state.get("ai_status") != "unavailable" else "degraded",
         "model_run_id": _state["run_id"],
         "dependencies": dependencies,
         "kafka_consumer": consumer.stats if consumer else {"status": "disabled"},
+        "local_readiness": _state.get("local_readiness"),
+        "ai": {"status": _state.get("ai_status", "not_checked"), "configured": dependencies["checks"]["groq_api_key"]},
     }
+
+
+@app.get("/ready")
+def readiness():
+    checks = _state.get("local_readiness")
+    if not checks or not all(checks.values()):
+        raise HTTPException(status_code=503, detail="Local deployment has not completed startup validation")
+    return {"status": "ready", "checks": checks, "model_run_id": _state["run_id"]}
 
 
 @app.get("/model-info", response_model=ModelInfo)
@@ -1007,7 +1027,7 @@ def _build_patient_queue_items(category: str | None = None, search: str = "") ->
             item
             for item in items
             if normalized_search in " ".join(
-                (item.patient_name, item.admission_reason, item.risk_category, item.discharge_ts)
+                (item.patient_name, _display_patient_name(item.patient_name), item.admission_reason, item.risk_category, item.discharge_ts)
             ).casefold()
         ]
     return items
@@ -1134,6 +1154,9 @@ def decide_patient_plan(
         actor=actor,
     )
     if decision_request.decision == "approved":
+        save_transition_report(
+            patient_id, episode_discharge_ts, build_transition_report(assessment, record, DISCLAIMER)
+        )
         notification = notify_care_plan_decision(
             patient_id=patient_id,
             discharge_ts=episode_discharge_ts,
@@ -1174,6 +1197,13 @@ def patient_report(patient_ref: str, discharge_ts: str | None = None):
         return TransitionReport(
             status="rejected_edit_required",
             message="Draft rejected. Edit the care plan, then send it for approval again.",
+        )
+
+    saved_report = public_report_path(patient_id, episode_discharge_ts)
+    if saved_report.is_file():
+        return TransitionReport(
+            status="approved", message="Approved mock care-transition report retrieved.",
+            report_markdown=saved_report.read_text(encoding="utf-8"), report_path=str(saved_report),
         )
 
     assessment = _assessment_cache_get(patient_id, episode_discharge_ts)
@@ -1342,12 +1372,19 @@ def chat(request: ChatRequest):
                 ),
             ) as trace,
         ):
-            result = _chat_fast_path(request.question, resolved) or ask(question)
+            result = _chat_fast_path(request.question, resolved)
+            if result is None:
+                result = ask(question)
+                _state["ai_status"] = "available"
             if trace:
                 trace.end(outputs=safe_trace_inputs(
                     tool_call_count=len(result.get("tool_calls", [])),
                     answer_chars=len(result.get("answer", "")),
                 ))
+    except (APIError, LLMUnavailableError) as e:
+        _state["ai_status"] = "unavailable"
+        logger.warning("Chat AI unavailable: %s", type(e).__name__)
+        raise HTTPException(status_code=503, detail=LLMUnavailableError.MESSAGE) from e
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
