@@ -11,7 +11,7 @@ def test_browser_fixture_uses_configured_chroma_path(tmp_path, monkeypatch):
 
     class Client:
         def create_collection(self, name, embedding_function):
-            assert name == browser_fixtures.COLLECTION_NAME
+            assert name == "discharge_notes"
             return Collection()
 
     def persistent_client(**kwargs):
