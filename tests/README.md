@@ -40,4 +40,4 @@ docker run --rm --init --shm-size=1g copilot-ci:local
 
 The separate process-restart test requires provisioned assets and skips when absent. Browser workflows verify real APIs, scoring, retrieval, approval, and saved state; fixture responses do not validate live Groq availability, generated-text clinical quality, or model calibration. A runtime import check also does not establish readiness with deployment assets.
 
-CI adds secret scanning, Linux container tests, and native Windows tests; see [automation](../.github/README.md). Historical counts in the main README describe their dated revision, not a fresh test run.
+CI adds secret scanning, Linux container tests, and native Windows tests; see [automation](../.github/AUTOMATION.md). Historical counts in the main README describe their dated revision, not a fresh test run.

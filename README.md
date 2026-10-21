@@ -143,7 +143,7 @@ The model produces a relative diagnostic risk score, **not a calibrated probabil
 | `scripts/` | [Launchers, maintenance, and diagnostic utilities](scripts/README.md) |
 | `tests/` | [Regression tests and fixture boundaries](tests/README.md) |
 | `Docs/` | [Setup, architecture, deployment, and model/data docs](Docs/README.md) |
-| `.github/` | [CI and release automation](.github/README.md) |
+| `.github/` | [CI and release automation](.github/AUTOMATION.md) |
 | `database/` | [Postgres migration and verification](database/README.md) |
 | `observability/` | [Prometheus and Grafana](observability/README.md) |
 | `results/` | [Modeling, care delivery, and operational outputs](results/README.md) |
