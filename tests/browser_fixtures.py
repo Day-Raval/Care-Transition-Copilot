@@ -43,7 +43,7 @@ def prepare_browser_fixture(root: Path):
     joblib.dump({"model": model, "feature_names": list(features.columns)}, root / "models/browser_fixture.joblib")
     order = np.argsort(-model.predict(features), kind="stable")
     ranks = {int(index): rank for rank, index in enumerate(order)}
-    collection = chromadb.PersistentClient(path=str(processed / "chroma_db")).create_collection(
+    collection = chromadb.PersistentClient(path="data/processed/chroma_db").create_collection(
         "discharge_notes", embedding_function=FixtureEmbedding())
     rows, documents, metadata, ids, notes = [], [], [], [], []
     for index, age in enumerate(ages):
