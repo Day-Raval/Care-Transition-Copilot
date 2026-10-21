@@ -51,7 +51,7 @@ The first retrieval query downloads Chroma's default ONNX embedding model if it 
 not cached. Run `check` while internet is available to populate the cache. The
 model/CSV/vector store must come from the same provisioned deployment.
 
-For an initial dataset/model build, use the existing [pipeline instructions](../README.md).
+For an initial dataset/model build, use the existing [pipeline instructions](../src/README.md#build-the-synthetic-pipeline).
 Do not retrain merely to start a deployed app; restore its versioned artifact.
 
 ## Startup and failures

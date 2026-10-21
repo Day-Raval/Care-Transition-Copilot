@@ -5,6 +5,22 @@ run notes in `Docs/` or `results/`.
 
 ## Unreleased
 
+### MVP delivery and documentation (October 2026)
+
+- Added validated Windows/Linux local deployment, persistent clinician assessments,
+  decisions and reports, deployment locking, and backup/restore.
+- Improved patient names/history, episode selection, and rapid-selection handling;
+  provider failures return safe errors while saved workflows remain accessible.
+- Added checksummed release packages, locked dependency updates, readiness checks,
+  and rollback on update failure.
+- Added cross-platform Python/Chromium CI, Linux container tests, non-root runtime
+  images, and tagged GHCR/GitHub Release publication automation with attestations.
+  The new container publishing path still requires its own preview/tagged verification.
+- Refreshed the MVP landing page and added backend, frontend, scripts, tests,
+  documentation, and automation folder guides; removed an unused stakeholder image.
+
+### Earlier documentation baseline
+
 - Reworked the top-level README into a concise GitHub landing page.
 - Moved the previous long README to `Docs/README_DETAILED.md`.
 - Added project hygiene files: license, contribution guide, code of conduct,

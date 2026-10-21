@@ -16,7 +16,6 @@ from groq.resources.chat.completions import Completions
 import uvicorn
 
 from src.api import local
-from tests.browser_fixtures import prepare_browser_fixture
 
 os.environ.update({"PERSISTENCE_BACKEND": "local", "AUTH_MODE": "api_key", "REDIS_URL": "",
                    "PYTHON_DOTENV_DISABLED": "1",
@@ -27,6 +26,8 @@ os.environ.update({"PERSISTENCE_BACKEND": "local", "AUTH_MODE": "api_key", "REDI
                    "NOTIFICATIONS_ENABLED": "false", "PRECOMPUTE_ON_STARTUP": "false",
                    "RISK_API_BASE_URL": "http://127.0.0.1:8093/api", "RATE_LIMIT_CHAT_PER_MINUTE": "0",
                    "RATE_LIMIT_ASSESSMENT_PER_MINUTE": "0", "RATE_LIMIT_WRITE_PER_MINUTE": "0"})
+
+from tests.browser_fixtures import prepare_browser_fixture
 
 outage = False
 

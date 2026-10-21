@@ -10,6 +10,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sksurv.linear_model import CoxPHSurvivalAnalysis
+from src.embeddings.build_vector_store import CHROMA_PATH, COLLECTION_NAME
 
 
 @register_embedding_function
@@ -43,8 +44,8 @@ def prepare_browser_fixture(root: Path):
     joblib.dump({"model": model, "feature_names": list(features.columns)}, root / "models/browser_fixture.joblib")
     order = np.argsort(-model.predict(features), kind="stable")
     ranks = {int(index): rank for rank, index in enumerate(order)}
-    collection = chromadb.PersistentClient(path=str(processed / "chroma_db")).create_collection(
-        "discharge_notes", embedding_function=FixtureEmbedding())
+    collection = chromadb.PersistentClient(path=str(root / CHROMA_PATH)).create_collection(
+        COLLECTION_NAME, embedding_function=FixtureEmbedding())
     rows, documents, metadata, ids, notes = [], [], [], [], []
     for index, age in enumerate(ages):
         name = f"Demo{chr(65 + index // 26)}{chr(65 + index % 26)}123 Example456"
