@@ -15,7 +15,7 @@ import zipfile
 from src.api.local import ROOT, deployment_lock
 
 FILES = {"README.md", "LICENSE", "pyproject.toml", "requirements.txt", "requirements.lock", ".env.example",
-         "Docs/LOCAL_DEPLOYMENT.md", "Docs/CI_CD.md", "web/package.json", "web/package-lock.json",
+         "Docs/LOCAL_DEPLOYMENT.md", "Docs/CI_CD.md", "Docs/CONTAINERS.md", "web/package.json", "web/package-lock.json",
          "web/vite.config.js", "web/index.html"}
 DIRECTORIES = ("src", "scripts", "web/src", "web/public", "web/dist")
 VERSION = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?")

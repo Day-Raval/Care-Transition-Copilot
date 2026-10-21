@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
     defaults:
       run:
         shell: bash
@@ -85,6 +85,53 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-results-${{ matrix.os }}
+          retention-days: 7
+          path: |
+            test-results/python.xml
+            web/test-results/
+            web/playwright-report/
+
+  containers:
+    name: Linux containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build test environment
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: ci
+          load: true
+          tags: copilot-ci:test
+          cache-from: type=gha,scope=ci
+          cache-to: type=gha,mode=max,scope=ci
+      - name: Run Python and browser workflows in container
+        run: |
+          mkdir -p test-results web/test-results web/playwright-report
+          docker run --rm --init --shm-size=1g \
+            -v "$PWD/test-results:/app/test-results" \
+            -v "$PWD/web/test-results:/app/web/test-results" \
+            -v "$PWD/web/playwright-report:/app/web/playwright-report" \
+            copilot-ci:test
+      - name: Build deployable application
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          tags: copilot:check
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+      - name: Verify runtime imports and excludes test endpoints
+        run: |
+          docker run --rm copilot:check python -c "import importlib.util; from src.api.local import create_app; app = create_app(); assert importlib.util.find_spec('tests') is None; assert not any('__test__' in getattr(route, 'path', '') for route in app.routes)"
+      - name: Upload container test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-results-linux-container
           retention-days: 7
           path: |
             test-results/python.xml

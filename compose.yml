@@ -1,0 +1,48 @@
+services:
+  copilot:
+    image: ${COPILOT_IMAGE:-ghcr.io/day-raval/care-transition-copilot:latest}
+    build:
+      context: .
+      target: runtime
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    environment:
+      PYTHON_DOTENV_DISABLED: "1"
+      PERSISTENCE_BACKEND: local
+      AUTH_MODE: api_key
+      KAFKA_ENABLED: "false"
+      KAFKA_CONSUMER_ENABLED: "false"
+      LANGSMITH_TRACING: "false"
+      NOTIFICATIONS_ENABLED: "false"
+      PRECOMPUTE_ON_STARTUP: "false"
+      REDIS_URL: ""
+      RISK_API_BASE_URL: http://127.0.0.1:8080/api
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./models
+        target: /app/models
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./results:/app/results
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - embedding-cache:/home/copilot/.cache
+volumes:
+  embedding-cache:

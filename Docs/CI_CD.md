@@ -4,12 +4,16 @@ GitHub Actions verifies changes and builds downloadable releases. Updates are
 applied on the local machine with an explicit update command. No runner needs
 access to the user's computer, credentials, patient state, or model artifacts.
 
+Container deployment, GHCR images, run-history findings, and the recommended CD
+sequence are documented in [CONTAINERS.md](CONTAINERS.md).
+
 ```mermaid
 flowchart LR
     change[Push / pull request] --> ci[Secret scan + Linux/Windows tests]
     tag[Version tag] --> gate[Same CI checks]
     gate --> package[Build UI + package app + checksums]
-    package --> release[GitHub Release]
+    package --> images[Publish app + CI images to GHCR]
+    images --> release[GitHub Release]
     release --> update[Local update command]
     update --> backup[Back up code and state]
     backup --> install[Install code and locked dependencies]
@@ -24,10 +28,10 @@ flowchart LR
 and calls from the release workflow. It performs:
 
 1. Gitleaks scanning of committed history.
-2. Tests on both `ubuntu-latest` and `windows-latest`.
-3. Python 3.12.10 (available on both GitHub runner platforms), Node 24.19.0,
-   and uv 0.11.3 setup. Local deployments may use other Python 3.12 patch releases.
-4. An isolated Python environment synced from `requirements.lock`.
+2. Tests in a Linux container plus native `windows-latest` compatibility tests.
+3. Python 3.12.10, Node 24.19.0, and uv 0.11.3, also pinned in the Dockerfile.
+   Local deployments may use other Python 3.12 patch releases.
+4. Locked dependencies in the container and an isolated Windows environment.
 5. Python tests, including package validation and rollback scenarios.
 6. `npm ci`, `npm run build:local`, and Chromium browser workflow tests.
 7. Test-result artifacts retained for seven days, including failure traces.
@@ -44,7 +48,9 @@ It remains available locally for the deployed model/store. CI's browser tests co
 disk-backed assessment/decision/report reads after volatile cache is cleared.
 
 Workflows have read-only repository permissions by default. Actions are pinned to
-commit SHAs. Only the tagged release-publishing job receives `contents: write`.
+commit SHAs. Only the tagged release-publishing job receives `contents: write`;
+the release container job receives `packages: write` for GHCR. Pull requests have
+no registry credentials or publishing permissions.
 
 ## Preview the package
 
@@ -70,10 +76,12 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The Release workflow reruns CI for that exact commit. When both platform jobs and
-the secret scan succeed, it builds a fresh local frontend, creates the package,
-verifies its SHA-256 checksum, and publishes the archive/checksum file on the tagged
-GitHub Release. Use a new tag/version for each release; do not move an existing tag.
+The Release workflow reruns CI for that exact commit. When container tests, Windows
+tests, and the secret scan succeed, it creates the ZIP in the container environment,
+publishes both images to GHCR, verifies the ZIP checksum, and publishes the
+archive/checksum file on the tagged GitHub Release. Use a new tag/version for each
+release; do not move an existing tag. A version containing a hyphen is marked as a
+prerelease and does not update the container's `latest` tag.
 
 Application packages contain source, launch/update scripts, dependency lockfiles,
 local deployment documentation, and the built UI. The embedded `release.json`

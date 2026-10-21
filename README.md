@@ -1,5 +1,7 @@
 # Care Transition Copilot
 
+Container builds, GHCR publishing, and deployment guidance: [Containers](Docs/CONTAINERS.md).
+
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/Day-Raval/Care-Transition-Copilot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Day-Raval/Care-Transition-Copilot/actions/workflows/ci.yml)
 [![JavaScript / JSX](https://img.shields.io/badge/javascript%20%2F%20jsx-frontend-f7df1e.svg)](web/)
