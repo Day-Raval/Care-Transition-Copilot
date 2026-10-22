@@ -5,6 +5,15 @@ run notes in `Docs/` or `results/`.
 
 ## Unreleased
 
+### Clinician workflow regression tests
+
+- Extended Playwright coverage for the complete clinician journey, rapid patient
+  switching, repeated approval clicks, network-failure retries, and orderly API
+  restart recovery without changing application behavior. All 12 browser tests pass.
+- Documented the unresolved synthetic retrieval-index failure after forced termination.
+- Include these test changes in the next release that delivers a user-facing fix
+  or resolves the recovery issue; no separate version or package release is planned.
+
 ### MVP delivery and documentation (October 2026)
 
 - Added validated Windows/Linux local deployment, persistent clinician assessments,

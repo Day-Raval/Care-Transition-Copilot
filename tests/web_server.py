@@ -3,6 +3,7 @@
 Only this test entry point installs provider stubs and test control endpoints.
 """
 import json
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import re
@@ -24,7 +25,7 @@ os.environ.update({"PERSISTENCE_BACKEND": "local", "AUTH_MODE": "api_key", "REDI
                    "CHROMA_PATH": "data/processed/chroma_db", "CHROMA_COLLECTION": "discharge_notes",
                    "KAFKA_ENABLED": "false", "KAFKA_CONSUMER_ENABLED": "false", "LANGSMITH_TRACING": "false",
                    "NOTIFICATIONS_ENABLED": "false", "PRECOMPUTE_ON_STARTUP": "false",
-                   "RISK_API_BASE_URL": "http://127.0.0.1:8093/api", "RATE_LIMIT_CHAT_PER_MINUTE": "0",
+                   "RISK_API_BASE_URL": f"http://127.0.0.1:{os.getenv('BROWSER_TEST_PORT', '8093')}/api", "RATE_LIMIT_CHAT_PER_MINUTE": "0",
                    "RATE_LIMIT_ASSESSMENT_PER_MINUTE": "0", "RATE_LIMIT_WRITE_PER_MINUTE": "0"})
 
 from tests.browser_fixtures import prepare_browser_fixture
@@ -59,11 +60,13 @@ def completion(**kwargs):
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory(prefix="copilot-browser-") as folder:
+    fixture_root = os.getenv("BROWSER_TEST_ROOT")
+    with nullcontext(fixture_root) if fixture_root else tempfile.TemporaryDirectory(prefix="copilot-browser-") as folder:
         root = Path(folder)
         os.chdir(root)
         local.ROOT = root
-        prepare_browser_fixture(root)
+        if not (root / "config.yaml").exists():
+            prepare_browser_fixture(root)
         from src.api import main, production
         production.CARE_DELIVERY_RESULTS_DIR = root / "care_delivery"
         production.OPERATIONS_RESULTS_DIR = root / "operations"
@@ -90,5 +93,12 @@ if __name__ == "__main__":
             main._state["assessment_cache"].clear()
             return {"status": "cleared"}
 
+        @app.post("/__test__/shutdown")
+        def shutdown():
+            server.should_exit = True
+            return {"status": "stopping"}
+
         with patch.object(Completions, "create", side_effect=completion):
-            uvicorn.run(app, host="127.0.0.1", port=8093, access_log=False)
+            server = uvicorn.Server(uvicorn.Config(
+                app, host="127.0.0.1", port=int(os.getenv("BROWSER_TEST_PORT", "8093")), access_log=False))
+            server.run()

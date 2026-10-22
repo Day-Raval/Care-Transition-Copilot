@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 test.describe.serial("local clinician workflow", () => {
   let firstName;
@@ -52,7 +53,11 @@ test.describe.serial("local clinician workflow", () => {
     await expect(page.locator(".report-preview")).toContainText("Clinician edited plan");
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download", exact: true }).click();
-    expect((await downloadPromise).suggestedFilename()).toMatch(/care-transition-report.*\.md/);
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/care-transition-report.*\.md/);
+    const markdown = await readFile(await download.path(), "utf8");
+    expect(markdown).toContain("Clinician edited plan: schedule follow-up within seven days.");
+    expect(markdown).toContain(firstName);
     await page.getByRole("combobox").selectOption("scheduled");
     await page.getByPlaceholder("Note", { exact: true }).fill("Appointment scheduled by clinician.");
     await page.getByRole("button", { name: "Save status" }).click();
@@ -61,6 +66,11 @@ test.describe.serial("local clinician workflow", () => {
     await page.getByPlaceholder("Reminder message").fill("Confirm follow-up attendance.");
     await page.getByRole("button", { name: "Schedule reminder" }).click();
     await expect(page.getByText(/Reminder scheduled for/)).toBeVisible();
+    await page.reload();
+    await page.locator(".queue-card").filter({ hasText: firstName }).first().click();
+    await expect(page.locator(".decision-badge.approved")).toBeVisible();
+    await expect(page.locator(".report-preview")).toContainText("Clinician edited plan");
+    await expect(page.getByText(/Last status: scheduled/)).toBeVisible();
   });
 
   test("saved approvals and reports remain available with AI down and cache cleared", async ({ page, request }) => {
@@ -113,23 +123,39 @@ test.describe.serial("local clinician workflow", () => {
 
   test("rapid patient selection keeps the latest episode on screen", async ({ page }) => {
     let delayed = false;
+    let release;
+    let intercepted;
+    const held = new Promise((resolve) => { release = resolve; });
+    const started = new Promise((resolve) => { intercepted = resolve; });
+    let finished;
+    const delivered = new Promise((resolve) => { finished = resolve; });
     await page.route("**/api/patients/*/assessment?*", async (route) => {
-      const response = await route.fetch();
       if (!delayed) {
         delayed = true;
-        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const response = await route.fetch();
+        const body = await response.json();
+        intercepted();
+        await held;
+        await route.fulfill({ response, json: { ...body, draft_plan: "STALE PATIENT PLAN MUST NEVER APPEAR" } });
+        finished();
+        return;
       }
-      await route.fulfill({ response });
+      await route.continue();
     });
     await page.goto("/");
     const cards = page.locator(".queue-card");
     const secondName = await cards.nth(1).locator(".queue-card-name").innerText();
     await cards.first().click();
+    await started;
     await cards.nth(1).click();
     await expect(page.locator(".panel-gold .panel-subtitle")).toContainText(secondName);
     await expect(page.locator(".panel-gold .plan-rendered").first()).toBeVisible();
-    await page.waitForTimeout(3000);
+    release();
+    await delivered;
+    // Wait for a later browser task so React can process the stale response.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await expect(page.locator(".panel-gold .panel-subtitle")).toContainText(secondName);
+    await expect(page.locator(".panel-gold")).not.toContainText("STALE PATIENT PLAN MUST NEVER APPEAR");
   });
 
   test("operations displays health, audit events, and persisted handoffs", async ({ page }) => {

@@ -156,3 +156,15 @@ If Python is installed elsewhere, set `CARE_TRANSITION_TEST_PYTHON` to its absol
 path before running browser tests. For WSL's cached environment, use
 `~/.cache/care-transition-copilot/local-venv/bin/python` with Linux Node/npm. CI sets
 this variable to its own isolated environment.
+
+The browser suite covers clinician review through report download and follow-up,
+refresh persistence, late responses after patient switching, repeated approval
+clicks, and recovery after assessment or decision-save connection failures.
+`restart.spec.js` also stops and starts a separate API process on an available port,
+using orderly shutdown, then checks saved approval, report download, and follow-up
+with AI unavailable. Forced-crash recovery is not covered: an exploratory forced
+stop of a freshly created synthetic Chroma index caused startup retrieval to fail
+on restart and needs separate investigation.
+Both browser servers use temporary synthetic deployments, not local user state.
+Hosted AI responses are deterministic test doubles; these tests do not verify
+the live provider or clinical quality of generated plans.
