@@ -64,7 +64,7 @@ flowchart TB
 | `data` | Synthetic samples and processed local datasets. |
 | `results` | Experiment results, fairness output, audit logs, care plans, decisions. |
 | `reports` | Generated mock care-transition reports. |
-| `Docs` | Proposal, data documentation, diagrams, PRD, SRS, and architecture docs. |
+| `docs` | Proposal, data documentation, diagrams, PRD, SRS, and architecture docs. |
 
 ## 4. Data Architecture
 

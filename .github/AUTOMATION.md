@@ -1,6 +1,6 @@
 # CI and release automation
 
-[CI/CD procedure](../Docs/CI_CD.md) · [Container and GHCR guide](../Docs/CONTAINERS.md)
+[CI/CD procedure](../docs/CI_CD.md) · [Container and GHCR guide](../docs/CONTAINERS.md)
 
 | Workflow | Triggers | Behavior |
 | --- | --- | --- |

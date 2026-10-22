@@ -21,7 +21,7 @@ npm ci
 npm run dev:full
 ```
 
-This starts API and Vite on Linux/WSL. On Windows, `npm run dev:full:win` uses WSL. For native Windows without WSL, use [local deployment](../Docs/LOCAL_DEPLOYMENT.md).
+This starts API and Vite on Linux/WSL. On Windows, `npm run dev:full:win` uses WSL. For native Windows without WSL, use [local deployment](../docs/LOCAL_DEPLOYMENT.md).
 
 `npm run dev` starts only Vite at `http://127.0.0.1:5173` and expects a separately running API. The proxy target defaults to `http://127.0.0.1:8080`, overridable with `API_PROXY_TARGET`; `/api` is stripped before forwarding. OIDC settings are in [`.env.example`](../.env.example).
 

@@ -28,7 +28,7 @@ COPY web/ ./web/
 COPY tests/ ./tests/
 COPY config.yaml ./config.yaml
 COPY .env.example ./.env.example
-COPY Docs/CI_CD.md Docs/LOCAL_DEPLOYMENT.md Docs/CONTAINERS.md ./Docs/
+COPY docs/CI_CD.md docs/LOCAL_DEPLOYMENT.md docs/CONTAINERS.md ./docs/
 RUN cd web && npm ci && npx playwright install --with-deps chromium
 ENV CARE_TRANSITION_TEST_PYTHON=/usr/local/bin/python CI=1
 CMD ["sh", "-c", "python -m pytest -q tests --junitxml=test-results/python.xml && npm --prefix web run test:e2e"]

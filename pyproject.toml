@@ -5,6 +5,7 @@ description = "Synthetic-data care transition AI demo with readmission risk scor
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+# Direct dependency source; mirror changes in requirements.txt (see CONTRIBUTING.md).
 dependencies = [
     "scikit-survival",
     "lifelines",

@@ -11,13 +11,13 @@ Care Transition Copilot is a synthetic-data healthcare AI MVP that brings readmi
 
 > Research and demonstration software only. Not for clinical use, not HIPAA validated, and not approved for real patient data or protected health information.
 
-[Run locally](#run-locally) · [Demo walkthrough](#demo-walkthrough) · [Architecture](ARCHITECTURE.md) · [Documentation](Docs/README.md)
+[Run locally](#run-locally) · [Demo walkthrough](#demo-walkthrough) · [Architecture](docs/ARCHITECTURE.md) · [Documentation](docs/README.md)
 
 ## Preview
 
-![High-risk discharge workflow](Docs/readme_workflow.svg)
+![High-risk discharge workflow](docs/readme_workflow.svg)
 
-![Clinician review preview](Docs/readme_clinician_review.svg)
+![Clinician review preview](docs/readme_clinician_review.svg)
 
 ## The MVP experience
 
@@ -61,7 +61,7 @@ flowchart LR
     rag --> chat
 ```
 
-The local profile uses SQLite/JSONL state and in-memory caching. Configurable integrations include Postgres, Redis, Kafka, OIDC/RBAC, notifications, Prometheus/Grafana, and LangSmith. These services are optional for the local showcase. See [backend modules](src/README.md) and the [full architecture](ARCHITECTURE.md).
+The local profile uses SQLite/JSONL state and in-memory caching. Configurable integrations include Postgres, Redis, Kafka, OIDC/RBAC, notifications, Prometheus/Grafana, and LangSmith. These services are optional for the local showcase. See [backend modules](src/README.md) and the [full architecture](docs/ARCHITECTURE.md).
 
 ## Run locally
 
@@ -97,7 +97,7 @@ bash scripts/local.sh run
 
 Open **http://127.0.0.1:8080**; stop with **Ctrl+C**. Subsequent starts only need `run`. The built UI and API share one address; API routes use `/api`. Run one instance against the state at a time. Local API-key mode delivers the demo key to the browser and is intended for a trusted, single-user loopback demo.
 
-See [local deployment](Docs/LOCAL_DEPLOYMENT.md) for provisioning, alternative ports, logs, backup/restore, and troubleshooting. `/api/ready` validates local dependencies; it does not verify live Groq connectivity.
+See [local deployment](docs/LOCAL_DEPLOYMENT.md) for provisioning, alternative ports, logs, backup/restore, and troubleshooting. `/api/ready` validates local dependencies; it does not verify live Groq connectivity.
 
 ### Containers
 
@@ -108,7 +108,7 @@ docker compose up -d --build
 curl --fail http://127.0.0.1:8080/api/ready
 ```
 
-Stop the native app first. Prepare writable state directories and Linux UID/GID 10001 permissions as described in the [container guide](Docs/CONTAINERS.md). Images exclude credentials, datasets, models, vector stores, and saved state; building an image does not provision them.
+Stop the native app first. Prepare writable state directories and Linux UID/GID 10001 permissions as described in the [container guide](docs/CONTAINERS.md). Images exclude credentials, datasets, models, vector stores, and saved state; building an image does not provision them.
 
 ## Recent delivery milestones
 
@@ -124,7 +124,7 @@ These summarize recent committed changes through October 21, 2026; they are impl
 | Container releases | Tagged-release automation for runtime/CI GHCR images, version/commit tags, SBOM/provenance, and release ZIP/checksums |
 | Documentation cleanup | Removed an unused stakeholder image; retained the workflow and clinician-review previews above |
 
-Manual Release runs build previews without publishing. The container guide records that the new publishing path still needed a preview and first tagged run at its October 21 review. See [CI/CD](Docs/CI_CD.md) for release/update procedures and [CHANGELOG.md](CHANGELOG.md) for project history.
+Manual Release runs build previews without publishing. The container guide records that the new publishing path still needed a preview and first tagged run at its October 21 review. See [CI/CD](docs/CI_CD.md) for release/update procedures and [CHANGELOG.md](CHANGELOG.md) for project history.
 
 ## Validation and MVP boundaries
 
@@ -132,7 +132,7 @@ Python regressions cover API security, patient scoping, persistence, retrieval, 
 
 The October 14 documentation recorded 101 provisioned-local Python passes, 100 passes plus one provisioned-runtime skip on each CI platform, and eight browser workflows per platform. Those are historical results for that revision, before the new container path; this README refresh does not rerun or certify them.
 
-The model produces a relative diagnostic risk score, **not a calibrated probability**. Synthetic readmission events are limited, subgroup fairness findings are inconclusive, and fixture-based workflow tests do not establish clinical or generated-text quality. See the [model card](Docs/MODEL_CARD.md), [data card](Docs/DATA_CARD.md), and [security model](SECURITY.md).
+The model produces a relative diagnostic risk score, **not a calibrated probability**. Synthetic readmission events are limited, subgroup fairness findings are inconclusive, and fixture-based workflow tests do not establish clinical or generated-text quality. See the [model card](docs/MODEL_CARD.md), [data card](docs/DATA_CARD.md), and [security model](SECURITY.md).
 
 ## Repository guide
 
@@ -142,7 +142,7 @@ The model produces a relative diagnostic risk score, **not a calibrated probabil
 | `web/` | [Clinician UI, development modes, and browser tests](web/README.md) |
 | `scripts/` | [Launchers, maintenance, and diagnostic utilities](scripts/README.md) |
 | `tests/` | [Regression tests and fixture boundaries](tests/README.md) |
-| `Docs/` | [Setup, architecture, deployment, and model/data docs](Docs/README.md) |
+| `docs/` | [Setup, architecture, deployment, and model/data docs](docs/README.md) |
 | `.github/` | [CI and release automation](.github/AUTOMATION.md) |
 | `database/` | [Postgres migration and verification](database/README.md) |
 | `observability/` | [Prometheus and Grafana](observability/README.md) |

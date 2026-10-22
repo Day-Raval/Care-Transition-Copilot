@@ -1,6 +1,6 @@
 # Backend and synthetic pipeline
 
-[Project overview](../README.md) · [Architecture](../ARCHITECTURE.md)
+[Project overview](../README.md) · [Architecture](../docs/ARCHITECTURE.md)
 
 Run Python modules from the repository root. `config.yaml` selects data paths, episode rules, feature windows, and the production model run. `.env` supplies runtime credentials and integration settings.
 
@@ -49,7 +49,7 @@ For PowerShell Python commands, activate with `.venv\Scripts\Activate.ps1`.
 Synthea generation uses the shell script and Java. Stop the local deployment
 before starting development servers. Use `bash dev.sh` on Linux/WSL or
 `npm run dev:full:win` from `web` on Windows (the
-Windows development launcher uses WSL). Use the [native local launcher](../Docs/LOCAL_DEPLOYMENT.md) for
+Windows development launcher uses WSL). Use the [native local launcher](../docs/LOCAL_DEPLOYMENT.md) for
 a deployment without WSL. WSL's development launcher uses a separate environment
 at `~/.cache/care-transition-copilot/venv` unless `CARE_TRANSITION_VENV` points
 to the Linux environment you prepared. Standalone development API routes omit the `/api`

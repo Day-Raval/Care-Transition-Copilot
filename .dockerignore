@@ -7,10 +7,10 @@
 !README.md
 !LICENSE
 !config.yaml
-!Docs/
-!Docs/CI_CD.md
-!Docs/LOCAL_DEPLOYMENT.md
-!Docs/CONTAINERS.md
+!docs/
+!docs/CI_CD.md
+!docs/LOCAL_DEPLOYMENT.md
+!docs/CONTAINERS.md
 !src/
 !src/**
 !scripts/

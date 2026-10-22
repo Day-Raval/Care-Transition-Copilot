@@ -1,9 +1,18 @@
 # Changelog
 
 All notable project changes should be summarized here. Keep detailed design and
-run notes in `Docs/` or `results/`.
+run notes in `docs/` or `results/`.
 
 ## Unreleased
+
+### Repository maintenance
+
+- Renamed `Docs/` to `docs/`, grouped architecture and requirements documents there,
+  and updated documentation links, Docker inputs, and release-package paths.
+- Removed the unused root placeholder `main.py`; application entry points remain unchanged.
+- Documented direct dependencies, their compatibility mirror, and lockfile maintenance;
+  aligned contributor setup with validated Python/frontend lockfiles.
+- Added an explicit pytest-cache ignore rule. No dependency versions changed.
 
 ### Clinician workflow regression tests
 
@@ -31,7 +40,7 @@ run notes in `Docs/` or `results/`.
 ### Earlier documentation baseline
 
 - Reworked the top-level README into a concise GitHub landing page.
-- Moved the previous long README to `Docs/README_DETAILED.md`.
+- Moved the previous long README to `docs/README_DETAILED.md`.
 - Added project hygiene files: license, contribution guide, code of conduct,
   CI workflow, model card, data card, and local check scripts.
 - Kept both dependency workflows supported: `requirements.txt` for operational

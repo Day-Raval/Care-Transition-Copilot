@@ -12,7 +12,7 @@ fi
 COMMAND="${1:-run}"
 if (( $# )); then shift; fi
 if [[ "$COMMAND" == install || "$COMMAND" == install-python ]]; then
-  command -v uv >/dev/null || { echo "Install uv first (see Docs/LOCAL_DEPLOYMENT.md)." >&2; exit 1; }
+  command -v uv >/dev/null || { echo "Install uv first (see docs/LOCAL_DEPLOYMENT.md)." >&2; exit 1; }
   uv venv --python 3.12 --allow-existing "$VENV"
   uv pip sync --python "$VENV/bin/python" "$ROOT/requirements.lock"
   if [[ "$COMMAND" == install ]]; then
@@ -20,6 +20,6 @@ if [[ "$COMMAND" == install || "$COMMAND" == install-python ]]; then
   fi
   exit 0
 fi
-[[ -x "$VENV/bin/python" ]] || { echo "Run local install first (see Docs/LOCAL_DEPLOYMENT.md)." >&2; exit 1; }
+[[ -x "$VENV/bin/python" ]] || { echo "Run local install first (see docs/LOCAL_DEPLOYMENT.md)." >&2; exit 1; }
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 exec "$VENV/bin/python" -m scripts.local "$COMMAND" "$@"

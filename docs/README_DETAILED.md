@@ -32,7 +32,7 @@ loop.
 
 ## How it works
 
-![High-risk discharge workflow](Docs/readme_workflow.svg)
+![High-risk discharge workflow](readme_workflow.svg)
 
 1. A discharge event enters the system.
 2. The risk model scores the patient's chance of readmission within 30 days.
@@ -517,7 +517,7 @@ Latest agent-orchestration summary:
 
 ## Clinician UI
 
-![Clinician review concept](Docs/readme_clinician_review.svg)
+![Clinician review concept](readme_clinician_review.svg)
 
 Implemented locally in `web/`:
 
@@ -615,9 +615,11 @@ cd care-transition-copilot
 cp .env.example .env
 
 # 3. Install Python dependencies
-uv pip install -r requirements.txt
+uv venv --python 3.12
+uv pip sync --python .venv/bin/python requirements.lock
+source .venv/bin/activate
 # or:
-pip install -r requirements.txt
+# Native Windows: follow CONTRIBUTING.md for the matching locked setup.
 
 # 4. Generate synthetic patient data
 ./scripts/generate_synthetic_data.sh
@@ -1017,7 +1019,7 @@ models/
 This project uses **synthetic data only**
 ([Synthea](https://synthetichealth.github.io/synthea/)) - no real patient data
 or data use agreement is required to run or demo it. See
-`Docs/data_documentation.md` for the full HL7v2/FHIR schema reference.
+`docs/data_documentation.md` for the full HL7v2/FHIR schema reference.
 
 ## Tech stack
 

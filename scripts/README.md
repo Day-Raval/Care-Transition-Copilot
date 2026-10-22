@@ -27,10 +27,10 @@ bash scripts/local.sh check
 bash scripts/local.sh run
 ```
 
-Use `install` first on a new environment. Native Windows/Linux use `.venv-local`; WSL defaults to `~/.cache/care-transition-copilot/local-venv`. See [deployment](../Docs/LOCAL_DEPLOYMENT.md) for provisioning and environment overrides.
+Use `install` first on a new environment. Native Windows/Linux use `.venv-local`; WSL defaults to `~/.cache/care-transition-copilot/local-venv`. See [deployment](../docs/LOCAL_DEPLOYMENT.md) for provisioning and environment overrides.
 
 Stop app/development processes before restoring or updating. Backups contain credentials and state: protect them and keep them out of Git. Release ZIPs contain code and a built UI, not datasets, model artifacts, or deployment credentials. Updates verify checksums, save recovery copies, synchronize dependencies, validate readiness, and roll back on failure. The update command leaves the app stopped.
 
 Synthea generation deletes old raw FHIR/note/metadata output. Preserve needed assets first. Container updates replace the image rather than using the native ZIP updater.
 
-See [backup/restore](../Docs/LOCAL_DEPLOYMENT.md), [releases and updates](../Docs/CI_CD.md), [containers](../Docs/CONTAINERS.md), and the [synthetic pipeline](../src/README.md#build-the-synthetic-pipeline).
+See [backup/restore](../docs/LOCAL_DEPLOYMENT.md), [releases and updates](../docs/CI_CD.md), [containers](../docs/CONTAINERS.md), and the [synthetic pipeline](../src/README.md#build-the-synthetic-pipeline).

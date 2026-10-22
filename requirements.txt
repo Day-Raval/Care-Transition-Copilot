@@ -1,3 +1,5 @@
+# Compatibility mirror of pyproject.toml runtime + dev dependencies.
+# Install requirements.lock for validated versions; see CONTRIBUTING.md.
 scikit-survival
 lifelines
 shap

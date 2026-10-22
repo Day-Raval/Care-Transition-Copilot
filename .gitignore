@@ -8,6 +8,7 @@ backups/
 web/test-results/
 web/playwright-report/
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo  
 .python-version

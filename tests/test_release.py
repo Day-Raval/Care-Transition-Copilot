@@ -9,7 +9,7 @@ from scripts import release
 
 
 def application(root, text="new"):
-    for name in ("scripts/local.py", "src/api/local.py", "requirements.lock", "web/dist/index.html"):
+    for name in ("scripts/local.py", "src/api/local.py", "requirements.lock", "web/dist/index.html", "docs/CI_CD.md"):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -44,10 +44,18 @@ def test_release_contains_only_application_and_checksums(tmp_path):
     archive = release.build_package(tmp_path, tmp_path / "output", "v1.2.3", "a" * 40)
     with zipfile.ZipFile(archive) as z:
         names = set(z.namelist())
-        assert names == {"scripts/local.py", "src/api/local.py", "requirements.lock", "web/dist/index.html", "release.json"}
+        assert names == {"scripts/local.py", "src/api/local.py", "requirements.lock", "web/dist/index.html", "docs/CI_CD.md", "release.json"}
     staging = tmp_path / "staging"
     staging.mkdir()
     assert release.verify_package(archive, tmp_path / "output/SHA256SUMS", staging)["version"] == "v1.2.3"
+
+
+@pytest.mark.parametrize("folder", ["docs", "Docs"])
+def test_release_accepts_current_and_previously_published_doc_paths(folder):
+    for name in ("CI_CD.md", "LOCAL_DEPLOYMENT.md", "CONTAINERS.md"):
+        assert release.application_path(f"{folder}/{name}")
+    assert not release.application_path(f"{folder}/unexpected.py")
+    assert not release.application_path(f"{folder}/../.env")
 
 
 def test_update_preserves_state_and_keeps_recovery_copy(tmp_path):

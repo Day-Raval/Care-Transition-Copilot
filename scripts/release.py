@@ -15,9 +15,11 @@ import zipfile
 from src.api.local import ROOT, deployment_lock
 
 FILES = {"README.md", "LICENSE", "pyproject.toml", "requirements.txt", "requirements.lock", ".env.example",
-         "Docs/LOCAL_DEPLOYMENT.md", "Docs/CI_CD.md", "Docs/CONTAINERS.md", "web/package.json", "web/package-lock.json",
+         "docs/LOCAL_DEPLOYMENT.md", "docs/CI_CD.md", "docs/CONTAINERS.md", "web/package.json", "web/package-lock.json",
          "web/vite.config.js", "web/index.html"}
 DIRECTORIES = ("src", "scripts", "web/src", "web/public", "web/dist")
+# Accept the documentation paths in previously published packages.
+LEGACY_DOC_FILES = {name.replace("docs/", "Docs/", 1) for name in FILES if name.startswith("docs/")}
 VERSION = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?")
 
 
@@ -27,7 +29,8 @@ def application_path(name):
             and not any(part in {"..", ".git", "node_modules", "__pycache__"} for part in path.parts)
             and (not path.name.startswith(".env") or name == ".env.example")
             and path.suffix not in {".pyc", ".pyo", ".jar", ".zip"}
-            and (name in FILES or any(name.startswith(directory + "/") for directory in DIRECTORIES)))
+            and (name in FILES or name in LEGACY_DOC_FILES
+                 or any(name.startswith(directory + "/") for directory in DIRECTORIES)))
 
 
 def application_files(root):
