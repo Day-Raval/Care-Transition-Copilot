@@ -5,6 +5,14 @@ run notes in `docs/` or `results/`.
 
 ## Unreleased
 
+### CI reliability
+
+- Replaced identical browser-fixture vectors with deterministic, patient-specific
+  note embeddings and closed the fixture's Chroma client after writing.
+- Added patient-scoped retrieval checks for every fixture patient before and after
+  a separate-process restart; application embeddings and user flow are unchanged.
+- Shared the CI concurrency group across push and manual events on each branch.
+
 ### Repository maintenance
 
 - Renamed `Docs/` to `docs/`, grouped architecture and requirements documents there,

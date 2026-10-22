@@ -1,5 +1,6 @@
 """Small synthetic deployment for browser tests; never reads the user's runtime data."""
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from src.embeddings.build_vector_store import CHROMA_PATH, COLLECTION_NAME
 class FixtureEmbedding(EmbeddingFunction):
     """Deterministic test embeddings: exercise storage/scoping, not semantic quality."""
     def __call__(self, input):
-        return [[1.0, 0.0, 0.0] for _ in input]
+        # Identical vectors for every note make filtered HNSW queries unreliable.
+        return [[1.0, *[byte / 2550 for byte in hashlib.sha256(text.encode()).digest()[:8]]]
+                for text in input]
 
     @staticmethod
     def name():
@@ -44,8 +47,6 @@ def prepare_browser_fixture(root: Path):
     joblib.dump({"model": model, "feature_names": list(features.columns)}, root / "models/browser_fixture.joblib")
     order = np.argsort(-model.predict(features), kind="stable")
     ranks = {int(index): rank for rank, index in enumerate(order)}
-    collection = chromadb.PersistentClient(path=str(root / CHROMA_PATH)).create_collection(
-        COLLECTION_NAME, embedding_function=FixtureEmbedding())
     rows, documents, metadata, ids, notes = [], [], [], [], []
     for index, age in enumerate(ages):
         name = f"Demo{chr(65 + index // 26)}{chr(65 + index % 26)}123 Example456"
@@ -62,11 +63,13 @@ def prepare_browser_fixture(root: Path):
             ("History of Present Illness", f"{name} is recovering after a synthetic hospital admission and requires follow-up review."),
             ("Assessment and Plan", "Assessment and Plan: Arrange follow-up with primary care and confirm discharge instructions."),
         ):
-            documents.append(text)
+            documents.append(f"{name}: {text}")
             metadata.append({"patient_id": patient_id, "section_name": section,
                              "encounter_id": f"encounter-{index}", "discharge_ts": discharged})
             ids.append(f"{index}-{section}")
         notes.append({"patient_id": patient_id, "discharge_ts": discharged, "text": documents[-1]})
     pd.DataFrame(rows).to_csv(processed / "discharge_records_with_target.csv", index=False)
     (processed / "discharge_notes.jsonl").write_text("\n".join(map(json.dumps, notes)) + "\n", encoding="utf-8")
-    collection.add(ids=ids, documents=documents, metadatas=metadata)
+    with chromadb.PersistentClient(path=str(root / CHROMA_PATH)) as client:
+        collection = client.create_collection(COLLECTION_NAME, embedding_function=FixtureEmbedding())
+        collection.add(ids=ids, documents=documents, metadatas=metadata)
