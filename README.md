@@ -47,18 +47,30 @@ New drafting, critique, and chat need a working AI provider. Patient browsing an
 ## How it works
 
 ```mermaid
-flowchart LR
-    input["Synthetic FHIR / HL7 ADT"] --> ingest["Discharge episodes + features"]
-    ingest --> risk["Versioned Cox risk model"]
-    ingest --> rag["Patient-scoped Chroma retrieval"]
-    ui["React workspace"] <--> api["FastAPI + auth + persistence"]
+flowchart TB
+    subgraph data["Data"]
+        input["Synthetic FHIR / HL7 ADT"] --> ingest["Discharge episodes + features"]
+    end
+    subgraph app["Application"]
+        ui["React workspace"] <--> api["FastAPI + auth + persistence"]
+    end
+    subgraph models["Models and retrieval"]
+        rag["Patient-scoped Chroma retrieval"]
+        risk["Versioned Cox risk model"]
+    end
+    subgraph ai["AI workflows"]
+        agents["LangGraph: risk gate, retrieve, draft, critique"]
+        chat["Chart-grounded chat"]
+    end
+    ingest --> rag
+    ingest --> risk
     api --> risk
-    api --> agents["LangGraph: risk gate, retrieve, draft, critique"]
+    api --> agents
+    api --> chat
     rag --> agents
+    rag --> chat
     agents --> review["Clinician review"]
     review -->|Approval| saved["Report + handoff records"]
-    api --> chat["Chart-grounded chat"]
-    rag --> chat
 ```
 
 The local profile uses SQLite/JSONL state and in-memory caching. Configurable integrations include Postgres, Redis, Kafka, OIDC/RBAC, notifications, Prometheus/Grafana, and LangSmith. These services are optional for the local showcase. See [backend modules](src/README.md) and the [full architecture](docs/ARCHITECTURE.md).
@@ -130,7 +142,7 @@ Manual Release runs build previews without publishing. The container guide recor
 
 Python regressions cover API security, patient scoping, persistence, retrieval, notifications, caching, release validation, and rollback. Chromium workflows exercise the clinician journey using isolated synthetic assets and deterministic provider/embedding fixtures. A separate provisioned-runtime test checks reads across process restarts. See [test instructions and limits](tests/README.md).
 
-The October 14 documentation recorded 101 provisioned-local Python passes, 100 passes plus one provisioned-runtime skip on each CI platform, and eight browser workflows per platform. Those are historical results for that revision, before the new container path; this README refresh does not rerun or certify them.
+A fresh-clone run on November 15, 2026 (Linux, Python 3.12.13, locked dependencies, no provider keys or deployment assets) recorded **104 Python passes plus one provisioned-runtime skip** and **all 12 Chromium browser workflows passing**. That run used Node 22 and a system Chrome build rather than the CI-pinned Node 24.19.0 and Playwright Chromium; CI remains the reference for both platforms. Earlier counts (October 14: 101 Python passes, eight browser workflows) describe that revision only.
 
 The model produces a relative diagnostic risk score, **not a calibrated probability**. Synthetic readmission events are limited, subgroup fairness findings are inconclusive, and fixture-based workflow tests do not establish clinical or generated-text quality. See the [model card](docs/MODEL_CARD.md), [data card](docs/DATA_CARD.md), and [security model](SECURITY.md).
 
