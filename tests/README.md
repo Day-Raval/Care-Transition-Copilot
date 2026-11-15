@@ -44,4 +44,4 @@ synthetic patients before and after reopening the store in a separate process.
 
 The separate process-restart test requires provisioned assets and skips when absent. Browser workflows verify real APIs, scoring, retrieval, approval, and saved state; fixture responses do not validate live Groq availability, generated-text clinical quality, or model calibration. A runtime import check also does not establish readiness with deployment assets.
 
-CI adds secret scanning, Linux container tests, and native Windows tests; see [automation](../.github/AUTOMATION.md). Historical counts in the main README describe their dated revision, not a fresh test run.
+CI adds secret scanning, Linux container tests, and native Windows tests; see [automation](../.github/AUTOMATION.md). Test counts in the main README are dated; each describes only the run it names.

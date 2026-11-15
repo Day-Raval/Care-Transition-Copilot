@@ -5,6 +5,14 @@ run notes in `docs/` or `results/`.
 
 ## Unreleased
 
+### Documentation refresh
+
+- Reorganized the README architecture diagram into a top-down layout grouped by
+  data, application, models and retrieval, and AI workflows; components and
+  connections are unchanged.
+- Recorded a fresh-clone validation run (November 15, 2026): 104 Python passes plus
+  one provisioned-runtime skip, and all 12 Chromium browser workflows passing.
+
 ### CI reliability
 
 - Replaced identical browser-fixture vectors with deterministic, patient-specific
